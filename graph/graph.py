@@ -17,21 +17,21 @@ from operator import itemgetter
 
 
 class AssociatedGraph:
-    def __init__(self, graphs: List[Tuple], output_path: str, path_full_subgraph: str, run_name: str, association_mode: str = "identity",  interface_list: Union[None, list] = None, centroid_threshold: int = 10):
-        if interface_list:
-            self.interface_list = interface_list
-        else:
-            self.interface_list = None
-        
+    def __init__(self, graphs: List[Tuple], output_path: str, path_full_subgraph: str, run_name: str, association_mode: str = "identity",  
+                 centroid_threshold: int = 10, neighbor_similarity_cutoff: float = 0.95, 
+                 rsa_similarity_threshold: float = 0.95):
+
         self.graphs = graphs
         self.output_path = output_path
         self.run_name = run_name
         self.association_mode = association_mode
         self.centroid_threshold = centroid_threshold
+        self.neighbor_similarity_cutoff = neighbor_similarity_cutoff
+        self.rsa_similarity_threshold = rsa_similarity_threshold
         Path(self.output_path).mkdir(parents=True, exist_ok=True)
         self.path_full_subgraph = path_full_subgraph
         
-        self.associated_graph = self._construct_graph(self.graphs, self.association_mode, self.centroid_threshold )
+        self.associated_graph = self._construct_graph(self.graphs, self.association_mode, self.centroid_threshold, self.neighbor_similarity_cutoff, self.rsa_similarity_threshold )
         
     def _build_multiple_contact_map(self, graphs: List[Tuple]) -> List[Tuple]:
 
@@ -42,7 +42,7 @@ class AssociatedGraph:
 
         return contact_residues_map
         
-    def _gen_associated_graph(self, graphsList: List[Tuple], association_mode: str, centroid_threshold: int):
+    def _gen_associated_graph(self, graphsList: List[Tuple], association_mode: str, centroid_threshold: int, neighbor_similarity_cutoff: float, rsa_similarity_threshold: float):
         
         graphsList = sorted(graphsList, key=lambda x: len(x[0].nodes()))
         
@@ -65,14 +65,14 @@ class AssociatedGraph:
         start = time()
         print(f"Vou iniciar o produto cartesiano")
         
-        M = association_product(graphs, association_mode=association_mode, nodes_graphs=nodes_graphs, contact_maps=contact_maps, residue_maps_all=residue_maps_all, centroid_threshold=centroid_threshold)
+        M = association_product(graphs, association_mode = association_mode, nodes_graphs = nodes_graphs, contact_maps = contact_maps, residue_maps_all = residue_maps_all, centroid_threshold = centroid_threshold, neighbor_similarity_cutoff = neighbor_similarity_cutoff, rsa_similarity_threshold=rsa_similarity_threshold)
         
         end = time()
         print(f"Tempo para produto cartesiano: {end - start}")
         
         return M
     
-    def _construct_graph(self, graphs, association_mode, centroid_threshold):
+    def _construct_graph(self, graphs: list, association_mode: str, centroid_threshold: int, neighbor_similarity_cutoff: float, rsa_similarity_threshold: float):
         # Create a contact map and a list with residue names order as the contact map
         # We do not need to do this, since graphein already build internally the distance matrix considering the centroid
         # This matrix can be obtained from: graph.graph["pdb_df"]
@@ -85,7 +85,7 @@ class AssociatedGraph:
         
         contact_residues_maps_sorted = sorted(contact_residues_maps, key=itemgetter(1)) 
                
-        associated_graph = self._gen_associated_graph(contact_residues_maps_sorted, association_mode, centroid_threshold)
+        associated_graph = self._gen_associated_graph(graphsList = contact_residues_maps_sorted, association_mode = association_mode, centroid_threshold = centroid_threshold, neighbor_similarity_cutoff= neighbor_similarity_cutoff, rsa_similarity_threshold = rsa_similarity_threshold)
 
         return associated_graph
     
@@ -157,7 +157,7 @@ class Graph:
                             granularity="centroids")
 
             
-        self.graph = construct_graph(config=config, path=graph_path)
+        self.graph = construct_graph(config=self.config, path=graph_path)
         
         self.subgraphs = {}
     
