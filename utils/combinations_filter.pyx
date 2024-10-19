@@ -23,7 +23,6 @@ cdef double compute_cv_distance(np.int64_t[:, :] nodes_view, np.int64_t i, np.in
         idx_i = nodes_view[i, k]
         idx_j = nodes_view[j, k]
 
-        # Verifica se idx_i e idx_j estão dentro dos limites
         if idx_i < 0 or idx_i >= distance_matrix_view.shape[0]:
             return -1.0
         if idx_j < 0 or idx_j >= distance_matrix_view.shape[1]:
@@ -38,8 +37,7 @@ cdef double compute_cv_distance(np.int64_t[:, :] nodes_view, np.int64_t i, np.in
 
     mean_distance = distances_sum / N
     if mean_distance == 0.0:
-        return -1.0  # Evita divisão por zero
-
+        return -1.0  
     temp = (distances_sq_sum / N) - (mean_distance * mean_distance)
     if temp < 0:
         temp = 0.0
@@ -66,11 +64,10 @@ def filtered_combinations(np.ndarray[np.int64_t, ndim=2, mode='c'] nodes not Non
 
     start_time = time(NULL)
 
-    # Loop sequencial sem paralelização
+
     for i in range(len_nodes):
         for j in range(i + 1, len_nodes):
 
-            # Verifica se todos os elementos de nodes_view[i, :] são diferentes de nodes_view[j, :]
             all_diff = True
             for k in range(N):
                 if nodes_view[i, k] == nodes_view[j, k]:
@@ -78,14 +75,13 @@ def filtered_combinations(np.ndarray[np.int64_t, ndim=2, mode='c'] nodes not Non
                     break
 
             if all_diff:
-                # Calcula o cv_distance
+
                 cv_distance = compute_cv_distance(nodes_view, i, j, distance_matrix_view, N)
 
                 if cv_distance >= 0.0 and cv_distance < max_cv:
-                    # Adiciona os pares ao resultado
+
                     result.append((nodes[i].copy(), nodes[j].copy()))
 
-        # Atualizando o progresso a cada 100 iterações
         if i % 100 == 0:
             elapsed_time = time(NULL) - start_time
             print(f"Progresso: {i}/{len_nodes}, Tempo decorrido: {elapsed_time:.2f} segundos")
