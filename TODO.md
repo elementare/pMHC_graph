@@ -121,3 +121,17 @@ Esse bloco de código tem a função de gerar todas os nós associados possívei
 
 Este workflow descreve as etapas gerais e as interações entre os componentes do código para realizar a análise de subgrafos em proteínas. Cada passo é fundamental para assegurar que as proteínas sejam processadas corretamente e que os resultados sejam precisos e informativos.
 
+## Lista de implementação
+
+- [x] Filtragem dos nós que não formaram edges levando em conta o grafo de referência
+- [x] Implementação da similaridade do RSA pelo valor absoluto da diferença 
+- [ ] Gerar as esferas independentemente se o subgrafo tem peptídeo na associação ou não
+- [ ] Realização de testes
+
+
+### Estratégias alternativas
+
+- Algoritmo de clusteriação para extrair os nós de associação
+- Árvore de decisão
+- Decoding 
+

@@ -526,10 +526,8 @@ def association_product(graphs: List, association_mode: str, nodes_graphs: List,
     filtered_contact_maps, filtered_rsa_maps, full_residue_maps = filter_reduce_maps(contact_maps=contact_maps, rsa_maps=rsa_maps, residue_maps=residue_maps_all, nodes_graphs=nodes_graphs, distance_threshold=centroid_threshold)
     log.info(f"Filtered contact maps and full residue maps created with success!")
     
-    prot_all_res = [[":".join(node.split(":")[:2]) for node in nodes_graph] for nodes_graph in nodes_graphs]
-    prot_all_res = np.array([node for sublist in prot_all_res for node in sublist])
-    
 
+    prot_all_res = np.array([node.split(":")[1] for node_graph in nodes_graphs for node in node_graph])
     ranges_graph = indices_graphs(graphs)
     
     log.info(f"Creating the Neighbors Vector...")
@@ -558,7 +556,8 @@ def association_product(graphs: List, association_mode: str, nodes_graphs: List,
         log.info("Identity: Creating associated nodes matrix...")
         associated_nodes_matrix = identity_matrix * neighbors_similarity * rsa_similarity
         log.info("Identity: Associated nodes matrix created with success!")
-    
+        log.debug(f"Dimension of Associated Matrix: {associated_nodes_matrix.shape}")
+
     elif association_mode == "similarity":
         log.info("Similarity: Creating associated nodes matrix...")
         residues_factors = create_residues_factors(graphs=graphs, factors_path=factors_path)
@@ -567,8 +566,7 @@ def association_product(graphs: List, association_mode: str, nodes_graphs: List,
         associated_nodes_matrix = similarity_matrix * neighbors_similarity * rsa_similarity
         np.fill_diagonal(associated_nodes_matrix, 0)
         log.info("Similarity: Associated nodes matrix created with success!")
-        
-    log.debug(f"Dimension of Associated Matrix: {associated_nodes_matrix.shape}")
+        log.debug(f"Dimension of Associated Matrix: {associated_nodes_matrix.shape}")
     
     lenght_actual = 0
     
@@ -593,10 +591,10 @@ def association_product(graphs: List, association_mode: str, nodes_graphs: List,
         log.info(f"Making associated graph between reference graph and graph {i}")
         possible_nodes = create_possible_nodes(reference_graph_indices=reference_graph_indices, associated_nodes=associated_nodes_matrix, range_graph=range_graph)
         # possible_nodes = [node for node in possible_nodes if check_multiple_chains(node, residue_maps_unique)]
-        
+        print(f"Possible nodes: {len(possible_nodes)}")
         intermediate_edges.append(generate_edges(nodes=possible_nodes, distance_matrix=distance_matrix, residue_maps_unique=residue_maps_unique))
         intermediate_graphs.append(create_graph(intermediate_edges[i][1]))
-        print(f"Possible nodes: {len(possible_nodes)}")
+        
         reference_graph_indices = [next(g)[0] for _, g in itertools.groupby(intermediate_graphs[i].nodes(), key=lambda x:x[0])]
 
     filtered_intermediate_graphs = filter_intermediate_graphs(intermediate_graphs[:-1], reference_graph_indices)
@@ -894,101 +892,6 @@ def align_structures_by_chain(reference_pdb, target_pdb, chain_id):
     print(f"RMSD: {super_imposer.rms:.4f} Å")
 
     return super_imposer
-
-'''
-def add_sphere_residues_old(node_names_molA, molA_path, node_names_molB, molB_path, output_path, ref_model):
-    # Read PDB file
-    parser = PDBParser()
-    structure_A = parser.get_structure('protein', inputmolA_path_pdb)
-    structure_B = parser.get_structure('protein', inputmolA_path_pdb)
-
-    # Create a new structure to hold the spheres
-    new_structure = Structure.Structure("spheres")
-
-    # Create a new model and chain
-    new_model = Model.Model(0)
-    new_chain = Chain.Chain('X')
-    new_model.add(new_chain)
-    new_structure.add(new_model)
-
-    # Keep track of added residues to avoid duplicates
-    added_residues = set()
-
-    # Add sphere residues to the new structure
-    for residue_info in residues_list:
-        chain_id, residue_name, residue_number = residue_info.split(':')
-        residue_key = (chain_id, int(residue_number))
-        if residue_key not in added_residues:
-            residue = structure[0][chain_id][int(residue_number)]
-            ca_atom = residue['CA']
-            sphere_residue = create_sphere_residue(residue_name, residue_number, ca_atom.get_coord())
-            new_chain.add(sphere_residue)
-            added_residues.add(residue_key)
-
-    # Write the new PDB file
-    io = PDBIO()
-    io.set_structure(new_structure)
-    io.save(output_pdb)
-'''
-
-# def add_sphere_residues(node_names_molA, molA_path, node_names_molB, molB_path, output_path, node_name):
-#     # Read PDB file
-#     parser = PDBParser()
-#     structure_A = parser.get_structure('protein', molA_path)
-#     structure_B = parser.get_structure('protein', molB_path)
-
-#     # Create a new structure to hold the spheres
-#     new_structure_A = Structure.Structure("spheres")
-#     new_structure_B = Structure.Structure("spheres")
-
-#     # Create a new model and chain for each mol
-#     new_model_A = Model.Model(0)
-#     new_chain_A = Chain.Chain('X')
-#     new_model_A.add(new_chain_A)
-#     new_structure_A.add(new_model_A)
-
-#     new_model_B = Model.Model(0)
-#     new_chain_B = Chain.Chain('X')
-#     new_model_B.add(new_chain_B)
-#     new_structure_B.add(new_model_B)
-
-#     # Keep track of added residues to avoid duplicates
-#     added_residues_A = set()
-#     added_residues_B = set()
-
-#     # Add sphere residues to the new structure
-#     for residue_info in node_names_molA:
-#         chain_id, residue_name, residue_number = residue_info.split(':')
-#         residue_key = (chain_id, int(residue_number))
-#         if residue_key not in added_residues_A:
-#             residue = structure_A[0][chain_id][int(residue_number)]
-#             #ca_atom = residue['CA']
-#             atom_coords = [atom.coord for atom in residue]
-#             centroid_coords = np.mean(atom_coords, axis=0)
-#             sphere_residue = create_sphere_residue(residue_name, residue_number, centroid_coords)
-#             new_chain_A.add(sphere_residue)
-#             added_residues_A.add(residue_key)
-
-#     for residue_info in node_names_molB:
-#         chain_id, residue_name, residue_number = residue_info.split(':')
-#         residue_key = (chain_id, int(residue_number))
-#         if residue_key not in added_residues_B:
-#             residue = structure_B[0][chain_id][int(residue_number)]
-#             #ca_atom = residue['CA']
-#             atom_coords = [atom.coord for atom in residue]
-#             centroid_coords = np.mean(atom_coords, axis=0)
-#             sphere_residue = create_sphere_residue(residue_name, residue_number, centroid_coords)
-#             new_chain_B.add(sphere_residue)
-#             added_residues_B.add(residue_key)
-
-#     # Write the new PDB file
-#     io = PDBIO()
-#     io.set_structure(new_structure_A)
-#     io.save(path.join(output_path,f'spheres_molA_{node_name}.pdb'))
-
-#     io = PDBIO()
-#     io.set_structure(new_structure_B)
-#     io.save(path.join(output_path,f'spheres_molB_{node_name}.pdb'))
 
 def add_sphere_residues(graphs, list_node_names_mol, output_path, node_name):
     
