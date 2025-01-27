@@ -584,7 +584,7 @@ def create_residues_factors(graphs: List, factors_path: str):
     return residue_factors
 
 # def association_product(graphs: List, association_mode: str, nodes_graphs: List, contact_maps: List, residue_maps_all: List, rsa_maps: List, factors_path: Union[List, None] = None, centroid_threshold: float = 10, residues_similarity_cutoff: float = 0.95, neighbor_similarity_cutoff: float = 0.95, rsa_similarity_threshold: float = 0.95, debug: bool = False):
-def association_product(graphsList: List, association_mode: str, factors_path: Union[List, None] = None, centroid_threshold: float = 10, residues_similarity_cutoff: float = 0.95, neighbor_similarity_cutoff: float = 0.95, rsa_similarity_threshold: float = 0.95, debug: bool = True):
+def association_product(graphsList: List, association_mode: str, factors_path: Union[List, None] = None, centroid_threshold: float = 10, residues_similarity_cutoff: float = 0.95, neighbor_similarity_cutoff: float = 0.95, rsa_similarity_threshold: float = 0.95, depth_similarity_threshold: float = 0.95, debug: bool = True):
     """Make the associated graph through the cartesian product of graphs, using somem modifications to filter nodes and edges.
     
     Args:
@@ -644,11 +644,8 @@ def association_product(graphsList: List, association_mode: str, factors_path: U
     log.info("RSA similarity matrix created with success!")
 
     log.info("Creating Depth similarity matrix...")
-    depth_similarity = create_similarity_matrix(nodes_graphs=nodes_graphs, ranges_graph = ranges_graph, total_lenght= total_lenght_graphs, residues_factors= filtered_depth_maps, similarity_cutoff=rsa_similarity_threshold, mode="1d")
+    depth_similarity = create_similarity_matrix(nodes_graphs=nodes_graphs, ranges_graph = ranges_graph, total_lenght= total_lenght_graphs, residues_factors= filtered_depth_maps, similarity_cutoff=depth_similarity_threshold, mode="1d")
     log.info("Depth similarity matrix created with success!")
-    
-
-
     
     if association_mode == "identity":
         
