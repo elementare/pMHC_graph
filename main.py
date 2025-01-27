@@ -7,7 +7,7 @@ import os
 from os import path
 import argparse
 from graph.graph import *
-from config.graph_config import make_graph_config
+from config.parse_configs import make_graph_config
 from io_utils.pdb_io import list_pdb_files, get_user_selection
 import logging, sys
 import json
@@ -15,7 +15,7 @@ import numpy
 import matplotlib
 from typing import Dict, List, Optional
 from SERD import read_vdw, read_pdb, get_vertices, surface, interface, _get_sincos
-
+from collections import defaultdict
 
 class Surface(object):
 
@@ -398,46 +398,18 @@ def parser_args() -> argparse.Namespace:
                         help="Factors for calculating the residue similarity ")
     parser.add_argument('--rsa_filter', type=none_or_float, default=0.1,
                         help="Threshold for filter residues by RSA")
-    parser.add_argument('--rsa_similarity_threshold', type=float, default=0.90,
+    parser.add_argument('--depth_similarity_threshold', type=float, default=0.95,
+                        help="Threshold for make an associate graph using Depth similarity")
+    parser.add_argument('--rsa_similarity_threshold', type=float, default=0.95,
                         help="Threshold for make an associate graph using RSA similarity")
     parser.add_argument('--residues_lists', type=str, default=None,
                         help="Path to Json file which contains the pdb residues")
+    parser.add_argument('--serd_file', type=str, default=None,
+                        help="Path to Json file which contains the SERD configuration" )
     parser.add_argument('--debug', type=bool, default=False,
                         help="Activate debug mode")
 
-    parser.add_argument(
-        "--vdw", type=str, default=None, help="Path to VDW file (optional)"
-    )
-    parser.add_argument(
-        "--step", type=float, default=0.6, help="Step size for surface modeling"
-    )
-    parser.add_argument(
-        "--probe", type=float, default=1.4, help="Probe radius for surface modeling"
-    )
-    parser.add_argument(
-        "--type",
-        type=str,
-        default="SES",
-        choices=["SES", "SAS"],
-        help="Type of surface to model (SES or SAS)",
-    )
-    parser.add_argument(
-        "--keep_only_interface",
-        action="store_true",
-        help="Keep only residues at the interface",
-    )
-    parser.add_argument(
-        "--ignore_backbone",
-        action="store_true",
-        help="Ignore backbone atoms for defining the interface",
-    )
-    parser.add_argument(
-        "--metric",
-        type=str,
-        default="minimum",
-        choices=["minimum", "centroid"],
-        help="Metric used to calculate the residue depth",
-    )
+
     args = parser.parse_args()
     
     return args
@@ -509,6 +481,7 @@ def main():
     centroid_threshold=args.centroid_threshold
     rsa_filter = args.rsa_filter
     rsa_similarity_threshold = args.rsa_similarity_threshold
+    depth_similarity_threshold = args.depth_similarity_threshold
     neighbor_similarity_cutoff = args.neighbor_similarity_cutoff
     
     debug = args.debug
@@ -525,7 +498,6 @@ def main():
     
     with open(args.residues_lists, "r") as f:
         residues_lists = json.load(f) 
-
 
     # List of paths
     mols_path = args.mols_path
@@ -551,9 +523,25 @@ def main():
     for mol_path in selected_files:
         g = Graph(config=config, graph_path=mol_path[0])
 
-        structure = Structure(vdw=args.vdw)
+        defaults_serd = {
+            "vdw": None,
+            "step": 0.6,
+            "probe": 1.4,
+            "type": "SES",
+            "keep_only_interface": True,
+            "ignore_backbone": True,
+            "metric": "minimum"
+        }
+
+        config_serd =  defaultdict(lambda: None, defaults_serd)
+
+        if args.serd_file:
+            with open(args.serd_file, "r") as f:
+                config_serd.update(json.load(f))
+
+        structure = Structure(vdw=config_serd["vdw"])
         structure.load(mol_path[0])
-        structure.model_surface(type=args.type, step=args.step, probe=args.probe)
+        structure.model_surface(type=config_serd["type"], step=config_serd["step"], probe=config_serd["probe"])
         # Seleciona os resíduos com numeração próxima
         # selected_residues = select_residues_within_range(structure)
 
@@ -574,12 +562,12 @@ def main():
     
         # s_g = get_exposed_residues_mhc(g, inter_list=inter_list, rsa_filter = rsa_filter, chains_peptide=["C"], chain_mhc="A")
         s_g = get_exposed_residues(graph=g, rsa_filter=rsa_filter, params=params )
-        s_g.residue_depth = structure.residue_depth(metric=args.metric, keep_only_interface=args.keep_only_interface, ignore_backbone=args.ignore_backbone)  
+        s_g.residue_depth = structure.residue_depth(metric=config_serd["metric"], keep_only_interface=config_serd["keep_only_interface"], ignore_backbone=config_serd["ignore_backbone"])  
         
         # logging.info(f"Residue Depth: {s_g.residue_depth}")
         graphs.append((s_g, mol_path[0]))
 
-    G = AssociatedGraph(graphs=graphs, reference_graph= reference_graph, output_path=output_path, path_full_subgraph=path_full_subgraph, association_mode=args.association_mode, factors_path=args.factors_path, run_name= args.run_name, centroid_threshold=centroid_threshold, residues_similarity_cutoff=args.residues_similarity_cutoff, neighbor_similarity_cutoff=neighbor_similarity_cutoff, rsa_similarity_threshold=rsa_similarity_threshold)
+    G = AssociatedGraph(graphs=graphs, reference_graph= reference_graph, output_path=output_path, path_full_subgraph=path_full_subgraph, association_mode=args.association_mode, factors_path=args.factors_path, run_name= args.run_name, centroid_threshold=centroid_threshold, residues_similarity_cutoff=args.residues_similarity_cutoff, neighbor_similarity_cutoff=neighbor_similarity_cutoff, rsa_similarity_threshold=rsa_similarity_threshold, depth_similarity_threshold=depth_similarity_threshold)
     # G_sub = G.associated_graph
 
     G.draw_graph(show = True)

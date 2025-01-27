@@ -19,7 +19,7 @@ import numpy as np
 class AssociatedGraph:
     def __init__(self, graphs: List[Tuple], reference_graph: Union[str, int, None], output_path: str, path_full_subgraph: str, run_name: str, 
                  association_mode: str = "identity", centroid_threshold: int = 10, neighbor_similarity_cutoff: float = 0.95, 
-                 rsa_similarity_threshold: float = 0.95, residues_similarity_cutoff: float = 0.95, factors_path: Union[str, None] = None):
+                 rsa_similarity_threshold: float = 0.95, depth_similarity_threshold: float = 0.95, residues_similarity_cutoff: float = 0.95, factors_path: Union[str, None] = None):
 
         self.graphs = graphs
         self.output_path = output_path
@@ -28,6 +28,7 @@ class AssociatedGraph:
         self.centroid_threshold = centroid_threshold
         self.neighbor_similarity_cutoff = neighbor_similarity_cutoff
         self.rsa_similarity_threshold = rsa_similarity_threshold
+        self.depth_similarity_threshold = depth_similarity_threshold
         self.factors_path = factors_path
         self.residues_similarity_cutoff = residues_similarity_cutoff
         self.reference_graph = reference_graph
@@ -35,7 +36,7 @@ class AssociatedGraph:
         Path(self.output_path).mkdir(parents=True, exist_ok=True)
         self.path_full_subgraph = path_full_subgraph
         
-        self.associated_graph = self._construct_graph(graphs=self.graphs, reference_graph=self.reference_graph, association_mode=self.association_mode, centroid_threshold=self.centroid_threshold, residues_similarity_cutoff=self.residues_similarity_cutoff, neighbor_similarity_cutoff=self.neighbor_similarity_cutoff, rsa_similarity_threshold=self.rsa_similarity_threshold, factors_path=self.factors_path )
+        self.associated_graph = self._construct_graph(graphs=self.graphs, reference_graph=self.reference_graph, association_mode=self.association_mode, centroid_threshold=self.centroid_threshold, residues_similarity_cutoff=self.residues_similarity_cutoff, neighbor_similarity_cutoff=self.neighbor_similarity_cutoff, rsa_similarity_threshold=self.rsa_similarity_threshold, depth_similarity_threshold=self.depth_similarity_threshold, factors_path=self.factors_path )
         
     def create_graphs_list(self, graphs: List[Tuple]) -> List[Tuple]:
 
@@ -48,7 +49,7 @@ class AssociatedGraph:
 
         return graphsList
         
-    def build_associated_graph(self, graphsList: List[Tuple], reference_graph: Union[str, int, None], association_mode: str, centroid_threshold: int, neighbor_similarity_cutoff: float, rsa_similarity_threshold: float, residues_similarity_cutoff: float, factors_path: Union[str, None]):
+    def build_associated_graph(self, graphsList: List[Tuple], reference_graph: Union[str, int, None], association_mode: str, centroid_threshold: int, neighbor_similarity_cutoff: float, rsa_similarity_threshold: float, depth_similarity_threshold: float, residues_similarity_cutoff: float, factors_path: Union[str, None]):
         
         if isinstance(reference_graph, int):
             graphsList[0], graphsList[reference_graph] = graphsList[reference_graph], graphsList[0]
@@ -77,7 +78,7 @@ class AssociatedGraph:
         start = time()
         print(f"Vou iniciar o produto cartesiano")
         
-        M = association_product(graphsList=self.graphsList, association_mode = association_mode, factors_path=factors_path, centroid_threshold = centroid_threshold, residues_similarity_cutoff=residues_similarity_cutoff, neighbor_similarity_cutoff = neighbor_similarity_cutoff, rsa_similarity_threshold=rsa_similarity_threshold)
+        M = association_product(graphsList=self.graphsList, association_mode = association_mode, factors_path=factors_path, centroid_threshold = centroid_threshold, residues_similarity_cutoff=residues_similarity_cutoff, neighbor_similarity_cutoff = neighbor_similarity_cutoff, rsa_similarity_threshold=rsa_similarity_threshold, depth_similarity_threshold=depth_similarity_threshold)
         # M = association_product(graphs=graphs, association_mode = association_mode, factors_path=factors_path, nodes_graphs = nodes_graphs, contact_maps = contact_maps, residue_maps_all = residue_maps_all, rsa_maps=rsa_maps, centroid_threshold = centroid_threshold, residues_similarity_cutoff=residues_similarity_cutoff, neighbor_similarity_cutoff = neighbor_similarity_cutoff, rsa_similarity_threshold=rsa_similarity_threshold)
         
         end = time()
@@ -85,7 +86,7 @@ class AssociatedGraph:
         
         return M
     
-    def _construct_graph(self, graphs: list, reference_graph: Union[str, int, None],  association_mode: str, centroid_threshold: int, neighbor_similarity_cutoff: float, rsa_similarity_threshold: float, residues_similarity_cutoff: float, factors_path: Union[str, None]):
+    def _construct_graph(self, graphs: list, reference_graph: Union[str, int, None],  association_mode: str, centroid_threshold: int, neighbor_similarity_cutoff: float, rsa_similarity_threshold: float, depth_similarity_threshold: float, residues_similarity_cutoff: float, factors_path: Union[str, None]):
         # Create a contact map and a list with residue names order as the contact map
         # We do not need to do this, since graphein already build internally the distance matrix considering the centroid
         # This matrix can be obtained from: graph.graph["pdb_df"]
@@ -94,7 +95,7 @@ class AssociatedGraph:
         # Instead of using the dist_mat we can build it again using compute_distmat(graph.graph["pdb_df"])
         
         graphsList= self.create_graphs_list(graphs)
-        associated_graph = self.build_associated_graph(graphsList = graphsList, reference_graph= reference_graph, association_mode = association_mode, centroid_threshold = centroid_threshold, factors_path=factors_path, residues_similarity_cutoff=residues_similarity_cutoff, neighbor_similarity_cutoff= neighbor_similarity_cutoff, rsa_similarity_threshold = rsa_similarity_threshold)
+        associated_graph = self.build_associated_graph(graphsList = graphsList, reference_graph= reference_graph, association_mode = association_mode, centroid_threshold = centroid_threshold, factors_path=factors_path, residues_similarity_cutoff=residues_similarity_cutoff, neighbor_similarity_cutoff= neighbor_similarity_cutoff, rsa_similarity_threshold = rsa_similarity_threshold, depth_similarity_threshold=depth_similarity_threshold)
 
         return associated_graph
     
