@@ -408,6 +408,8 @@ def parser_args() -> argparse.Namespace:
                         help="Path to Json file which contains the SERD configuration" )
     parser.add_argument('--debug', type=bool, default=False,
                         help="Activate debug mode")
+    parser.add_argument('--angle_diff', type=float, default=20.0,
+                        help="Max angle difference to filter association graph's nodes")
 
 
     args = parser.parse_args()
@@ -567,7 +569,7 @@ def main():
         # logging.info(f"Residue Depth: {s_g.residue_depth}")
         graphs.append((s_g, mol_path[0]))
 
-    G = AssociatedGraph(graphs=graphs, reference_graph= reference_graph, output_path=output_path, path_full_subgraph=path_full_subgraph, association_mode=args.association_mode, factors_path=args.factors_path, run_name= args.run_name, centroid_threshold=centroid_threshold, residues_similarity_cutoff=args.residues_similarity_cutoff, neighbor_similarity_cutoff=neighbor_similarity_cutoff, rsa_similarity_threshold=rsa_similarity_threshold, depth_similarity_threshold=depth_similarity_threshold)
+    G = AssociatedGraph(graphs=graphs, reference_graph= reference_graph, output_path=output_path, path_full_subgraph=path_full_subgraph, association_mode=args.association_mode, factors_path=args.factors_path, run_name= args.run_name, centroid_threshold=centroid_threshold, residues_similarity_cutoff=args.residues_similarity_cutoff, neighbor_similarity_cutoff=neighbor_similarity_cutoff, rsa_similarity_threshold=rsa_similarity_threshold, depth_similarity_threshold=depth_similarity_threshold, angle_diff=args.angle_diff)
     # G_sub = G.associated_graph
 
     G.draw_graph(show = True)
