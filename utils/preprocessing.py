@@ -6,9 +6,31 @@ from io_utils.pdb_io import list_pdb_files, get_user_selection
 from config.parse_configs import make_graph_config
 from classes.classes import StructureSERD
 from collections import defaultdict
-from os import path
+from os import path, makedirs
+from Bio import PDB
 
 log = logging.getLogger("Preprocessing")
+
+
+def remove_water_from_pdb(input_pdb, output_pdb):
+    """Remove water molecules (HOH) from a PDB file and save the cleaned version."""
+
+    if path.exists(output_pdb):
+        log.debug(f"The file {output_pdb} already exists.")
+    
+    else:
+        parser = PDB.PDBParser(QUIET=True)
+        structure = parser.get_structure("protein", input_pdb)
+
+        io = PDB.PDBIO()
+        io.set_structure(structure)
+
+        class NoWaterSelect(PDB.Select):
+            def accept_residue(self, residue):
+                return residue.get_resname() != "HOH"  # Exclude water molecules
+
+        io.save(output_pdb, select=NoWaterSelect())
+        log.debug(f"Saved cleaned PDB file: {output_pdb}")
 
 def get_exposed_residues(graph: Graph, rsa_filter = 0.1, params=None):
     all_residues = []
@@ -60,8 +82,8 @@ def calculate_residue_depth(mol_path, serd_config=None):
         "step": 0.6,
         "probe": 1.4,
         "type": "SES",
-        "keep_only_interface": True,
-        "ignore_backbone": True,
+        "keep_only_interface": False,
+        "ignore_backbone": False,
         "metric": "minimum"
     })
 
@@ -87,29 +109,36 @@ def create_graphs(args):
     with open(args.residues_lists, "r") as f:
         residues_lists = json.load(f) 
 
-    if args.folder_path and not args.files_name:
+    pdb_dir = args.folder_path
+    if not pdb_dir:
+        raise Exception(f"You must provide the path for PDB folder")
+    
+    if pdb_dir and not args.files_name:
         mols_files = list_pdb_files(args.folder_path)
         if not mols_files:
             raise Exception(f"I didn't find any file in: {args.folder_path}")
             
         selected_files, reference_graph = get_user_selection(mols_files, args.folder_path)
         
-    elif args.folder_path and args.files_name:
+    elif pdb_dir and args.files_name:
         files_name = args.files_name.split(',')
-        pdb_dir = args.folder_path
         selected_files = []
         reference_graph = None
         for file_name in files_name:
             if args.reference_graph == file_name:
-                reference_graph = (path.join(pdb_dir, file_name), file_name)
+                reference_graph = [path.join(pdb_dir, file_name), file_name]
             else:
-                selected_files.append((path.join(pdb_dir, file_name), file_name))
+                selected_files.append([path.join(pdb_dir, file_name), file_name])
 
     Path(args.output_path).mkdir(parents=True, exist_ok=True)
     config = make_graph_config(centroid_threshold=args.centroid_threshold)
     
     graphs = []
     for mol_path in selected_files:
+        mol_path_clean = path.join(pdb_dir, mol_path[1].replace('.pdb', '_nOH.pdb'))
+        remove_water_from_pdb(mol_path[0], mol_path_clean)
+        mol_path[0] = mol_path_clean
+
         g = Graph(config=config, graph_path=mol_path[0])
 
         residue_depth = calculate_residue_depth(mol_path=mol_path[0], serd_config=args.serd_config)

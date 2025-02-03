@@ -13,7 +13,6 @@ import json
 import numpy
 import matplotlib
 from typing import Dict, List, Optional
-from classes.classes import Structure
 from collections import defaultdict
 from cli.cli_parser import parse_args
 from utils.preprocessing import create_graphs
@@ -47,7 +46,7 @@ def main():
     log = logging.getLogger("CRSProtein")
     log.setLevel(logging.DEBUG if args.debug else logging.INFO)
 
-    graphs, reference_graph= create_graphs(args)
+    graphs, reference_graph = create_graphs(args)
 
     G = AssociatedGraph(
         graphs=graphs,
