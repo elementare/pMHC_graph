@@ -36,12 +36,12 @@ def get_user_selection(pdb_files, pdb_dir):
             return get_user_selection(pdb_files, pdb_dir)
     
     if 1 in selected_numbers:
-        selected_files = [(os.path.join(pdb_dir, pdb), pdb) for pdb in pdb_files]
+        selected_files = [[os.path.join(pdb_dir, pdb), pdb] for pdb in pdb_files]
     else:
         selected_files = []
         for i in selected_numbers:
             try:
-                selected_files.append((os.path.join(pdb_dir, pdb_files[i-2]), pdb_files[i-2]))
+                selected_files.append([os.path.join(pdb_dir, pdb_files[i-2]), pdb_files[i-2]])
             except IndexError:
                 print(f"Number {i} is out of range. Skipping.")
                 

@@ -12,94 +12,165 @@ from utils.tools import association_product,build_contact_map, add_sphere_residu
 import plotly.graph_objects as go
 from pathlib import Path
 from os import path
-from typing import Callable, Any, Union, Optional, List, Tuple
+from typing import Callable, Any, Union, Optional, List, Tuple, Dict
 from operator import itemgetter
 import numpy as np
+import logging
+
+log = logging.getLogger("CRSProtein")
+
+
+class Graph:
+    """Represents a protein structure graph."""
+
+    def __init__(self, graph_path: str, config: Optional[ProteinGraphConfig] = None):
+        """
+        Initialize a Graph instance.
+
+        :param graph_path: Path to the PDB file.
+        :param config: Custom configuration for the protein graph.
+        """
+        self.config = config or ProteinGraphConfig(
+            edge_construction_functions=[partial(add_distance_threshold, long_interaction_threshold=0, threshold=10)],
+            graph_metadata_functions=[rsa, secondary_structure],
+            dssp_config=DSSPConfig(),
+            granularity="centroids"
+        )
+        self.graph = construct_graph(config=self.config, path=graph_path)
+        self.subgraphs: Dict[str, nx.Graph] = {}
+
+    def get_subgraph(self, name:str):
+        if name not in self.subgraphs.keys():
+            print(f"Can't find {name} in subgraph")
+        else:
+            return self.subgraphs[name]
+    
+    def create_subgraph(self, name: str, node_list: list = [], return_node_list: bool = False, **args):
+        if name in self.subgraphs.keys():
+            print(f"You already have this subgraph created. Use graph.delete_subraph({name}) before creating it again.")
+        elif not node_list:
+            self.subgraphs[name] =  extract_subgraph(g = self.graph, **args)
+            print(f"Subgraph {name} created with success!")
+        elif node_list:
+            self.subgraphs[name] = self.graph.subgraph(node_list)
+        
+        if return_node_list:
+            return self.subgraphs[name].nodes
+        
+    def delete_subraph(self, name: str):
+        if name not in  self.subgraphs.keys():
+            del self.subgraphs[name]
+        else:
+            print(f"{name} isn't in.subgraphs")
+
+    def filter_subgraph(self, 
+            subgraph_name: str,
+            filter_func: Union[Callable[..., Any], str],
+            name: Union[str, None] = None, 
+            return_node_list: bool = False):
+           
+        nodes = [i for i in self.subgraphs[subgraph_name].nodes if filter_func(i)]
+        if name:
+            self.subgraphs[name] = self.subgraphs[subgraph_name].subgraph(nodes)
+        else:
+            self.subgraphs[subgraph_name] = self.subgraphs[subgraph_name].subgraph(nodes)
+        
+        if return_node_list:
+            return self.subgraphs[name].nodes if name != None else self.subgraphs[subgraph_name].nodes
+
+    def join_subgraph(self, name: str, graphs_name: list, return_node_list: bool = False):
+        if name in self.subgraphs.keys():
+            print(f"You already have this subgraph created. Use graph.delete_subraph({name}) before creating it again.")
+        elif set(graphs_name).issubset(self.subgraphs.keys()):
+            
+            self.subgraphs[name] = self.graph.subgraph([node for i in graphs_name for node in self.subgraphs[i].nodes])
+            if return_node_list:
+                return self.subgraphs[name].nodes
+        else:
+            print(f"Some of your subgraph isn't in the subgraph list")
 
 class AssociatedGraph:
-    def __init__(self, graphs: List[Tuple], reference_graph: Union[str, int, None], output_path: str, path_full_subgraph: str, run_name: str, 
-                 association_mode: str = "identity", centroid_threshold: int = 10, neighbor_similarity_cutoff: float = 0.95, 
-                 rsa_similarity_threshold: float = 0.95, residues_similarity_cutoff: float = 0.95, factors_path: Union[str, None] = None):
+    """Handles the association of multiple protein graphs."""
 
+    def __init__(self, 
+                 graphs: List[Tuple], 
+                 reference_graph: Union[str, int, None], 
+                 output_path: str, 
+                 path_full_subgraph: str, 
+                 run_name: str, 
+                 association_mode: str = "identity",
+                 centroid_threshold: int = 10, 
+                 neighbor_similarity_cutoff: float = 0.95, 
+                 rsa_similarity_threshold: float = 0.95, 
+                 depth_similarity_threshold: float = 0.95, 
+                 residues_similarity_cutoff: float = 0.95, 
+                 angle_diff: float = 20, 
+                 factors_path: Optional[str] = None):
+        """
+        Initialize an AssociatedGraph instance.
+
+        :param graphs: List of protein graphs.
+        :param reference_graph: Reference graph identifier.
+        :param output_path: Path to save results.
+        :param run_name: Unique run identifier.
+        :param association_mode: Mode for associating graphs.
+        :param centroid_threshold: Threshold for centroid calculations.
+        :param neighbor_similarity_cutoff: Cutoff for neighbor similarity.
+        :param rsa_similarity_threshold: Cutoff for RSA similarity.
+        :param depth_similarity_threshold: Cutoff for depth similarity.
+        :param residues_similarity_cutoff: Cutoff for residue similarity.
+        :param angle_diff: Angle difference threshold.
+        :param factors_path: Path to external factors file.
+        """
         self.graphs = graphs
-        self.output_path = output_path
+        self.output_path = Path(output_path)
         self.run_name = run_name
+        self.path_full_subgraph = path_full_subgraph
+        self.reference_graph = reference_graph
         self.association_mode = association_mode
         self.centroid_threshold = centroid_threshold
         self.neighbor_similarity_cutoff = neighbor_similarity_cutoff
         self.rsa_similarity_threshold = rsa_similarity_threshold
-        self.factors_path = factors_path
+        self.depth_similarity_threshold = depth_similarity_threshold
         self.residues_similarity_cutoff = residues_similarity_cutoff
-        self.reference_graph = reference_graph
-        self.graphsList = None
-        Path(self.output_path).mkdir(parents=True, exist_ok=True)
-        self.path_full_subgraph = path_full_subgraph
+        self.angle_diff = angle_diff
+        self.factors_path = factors_path
+        self.graphs_list = self._prepare_graphs()
         
-        self.associated_graph = self._construct_graph(graphs=self.graphs, reference_graph=self.reference_graph, association_mode=self.association_mode, centroid_threshold=self.centroid_threshold, residues_similarity_cutoff=self.residues_similarity_cutoff, neighbor_similarity_cutoff=self.neighbor_similarity_cutoff, rsa_similarity_threshold=self.rsa_similarity_threshold, factors_path=self.factors_path )
-        
-    def create_graphs_list(self, graphs: List[Tuple]) -> List[Tuple]:
+        self.associated_graph = self._build_associated_graph()
 
-        graphsList = []
-        for item in graphs:
-            contact_map, residue_map, residue_map_all = build_contact_map(item[1])
-            rsa_map = np.array(item[0].graph["dssp_df"]["rsa"])
-            graphsList.append((item[0], item[1], contact_map, residue_map, residue_map_all, rsa_map))
+    def _prepare_graphs(self) -> List[Tuple]:
+        """Prepares the graph list by computing necessary mappings."""
+        return [
+            (g, raw, *build_contact_map(raw), np.array(g.graph["dssp_df"]["rsa"]), g.residue_depth)
+            for g, raw in self.graphs
+        ]
 
-        return graphsList
-        
-    def build_associated_graph(self, graphsList: List[Tuple], reference_graph: Union[str, int, None], association_mode: str, centroid_threshold: int, neighbor_similarity_cutoff: float, rsa_similarity_threshold: float, residues_similarity_cutoff: float, factors_path: Union[str, None]):
-        
-        if isinstance(reference_graph, int):
-            graphsList[0], graphsList[reference_graph] = graphsList[reference_graph], graphsList[0]
-            
-        elif isinstance(reference_graph, str):
-
-            index = next((i for i, x in enumerate(graphsList) if x[1] == reference_graph), None)
-
-            if index is not None:
-                graphsList[0], graphsList[index] = graphsList[index], graphsList[0]
-            else:
-                graphsList = sorted(graphsList, key=lambda x: len(x[0].nodes()))
-        elif reference_graph is None:
-            graphsList = sorted(graphsList, key=lambda x: len(x[0].nodes()))
-        
-        self.graphsList = graphsList
-        contact_maps = [graph[2] for graph in graphsList]
-
-        graphs = [graph[0] for graph in graphsList]
-        # residue_maps = [graph[3] for graph in graphsList]
-        residue_maps_all = [graph[4] for graph in graphsList]    
-        rsa_maps = [graph[5] for graph in graphsList]   
- 
-        
-        nodes_graphs = [list(graph.nodes()) for graph in graphs]
-
+    def _build_associated_graph(self) -> nx.Graph:
+        """Constructs the associated graph based on the given graphs."""
         start = time()
-        print(f"Vou iniciar o produto cartesiano")
-        
-        M = association_product(graphs=graphs, association_mode = association_mode, factors_path=factors_path, nodes_graphs = nodes_graphs, contact_maps = contact_maps, residue_maps_all = residue_maps_all, rsa_maps=rsa_maps, centroid_threshold = centroid_threshold, residues_similarity_cutoff=residues_similarity_cutoff, neighbor_similarity_cutoff = neighbor_similarity_cutoff, rsa_similarity_threshold=rsa_similarity_threshold)
-        
-        end = time()
-        print(f"Tempo para produto cartesiano: {end - start}")
-        
-        return M
+        associated = association_product(
+            associated_graph_object=self,
+            graphsList=self.graphs_list, 
+            association_mode=self.association_mode, 
+            factors_path=self.factors_path, 
+            centroid_threshold=self.centroid_threshold, 
+            residues_similarity_cutoff=self.residues_similarity_cutoff, 
+            neighbor_similarity_cutoff=self.neighbor_similarity_cutoff, 
+            rsa_similarity_threshold=self.rsa_similarity_threshold, 
+            depth_similarity_threshold=self.depth_similarity_threshold, 
+            angle_diff=self.angle_diff
+        )
+        log.info(f"Association product computed in {time() - start:.2f} seconds")
+        return associated
     
-    def _construct_graph(self, graphs: list, reference_graph: Union[str, int, None],  association_mode: str, centroid_threshold: int, neighbor_similarity_cutoff: float, rsa_similarity_threshold: float, residues_similarity_cutoff: float, factors_path: Union[str, None]):
-        # Create a contact map and a list with residue names order as the contact map
-        # We do not need to do this, since graphein already build internally the distance matrix considering the centroid
-        # This matrix can be obtained from: graph.graph["pdb_df"]
-        # The contact matrix can be obtained from: graph.graph["dist_mat"]
-        # Usually this dist_mat is not updated in related to the pdb_df after graph subsets, so it is important to double check it 
-        # Instead of using the dist_mat we can build it again using compute_distmat(graph.graph["pdb_df"])
-        
-        graphsList= self.create_graphs_list(graphs)
-        associated_graph = self.build_associated_graph(graphsList = graphsList, reference_graph= reference_graph, association_mode = association_mode, centroid_threshold = centroid_threshold, factors_path=factors_path, residues_similarity_cutoff=residues_similarity_cutoff, neighbor_similarity_cutoff= neighbor_similarity_cutoff, rsa_similarity_threshold = rsa_similarity_threshold)
-
-        return associated_graph
     
+    def add_spheres(self):
+        ...
+        
     def draw_graph(self, show = True, save = True):
         if not show and not save:
-            print("You are not saving or viewing the graph. Please leave at least one of the parameters as true.")
+            log.info("You are not saving or viewing the graph. Please leave at least one of the parameters as true.")
         else:
             node_colors = [self.associated_graph.nodes[node]['chain_id'] for node in self.associated_graph.nodes]
             # Draw the full cross-reactive subgraph
@@ -111,7 +182,7 @@ class AssociatedGraph:
                 plt.savefig(self.path_full_subgraph)
                 plt.clf()
     
-                print(f"GraphAssociated's plot saved in {self.path_full_subgraph}")
+                log.info(f"GraphAssociated's plot saved in {self.path_full_subgraph}")
   
     def grow_subgraph_bfs(self):
         # Build all possible common TCR interface pMHC subgraphs centered at the peptide nodes 
@@ -153,72 +224,7 @@ class AssociatedGraph:
             print(f'No peptide nodes were found in the association graph. No subgraph will be generated.')
         pass
         
-    
-class Graph:
-    def __init__(self, graph_path, config = None):
-        if config:
-            self.config = config
-        else:
-            self.config = ProteinGraphConfig(edge_construction_functions=[partial(add_distance_threshold, long_interaction_threshold=0, threshold=centroid_threshold)],
-                            graph_metadata_functions=[rsa, secondary_structure], 
-                            dssp_config=DSSPConfig(),
-                            granularity="centroids")
 
-            
-        self.graph = construct_graph(config=self.config, path=graph_path)
-        
-        self.subgraphs = {}
-    
-    def get_subgraph(self, name:str):
-        if name not in self.subgraphs.keys():
-            print(f"Can't find {name} in subgraph")
-        else:
-            return self.subgraphs[name]
-    
-    def create_subgraph(self, name: str, node_list: list = [], return_node_list: bool = False, **args):
-        if name in self.subgraphs.keys():
-            print(f"You already have this subgraph created. Use graph.delete_subraph({name}) before creating it again.")
-        elif not node_list:
-            self.subgraphs[name] =  extract_subgraph(g = self.graph, **args)
-            print(f"Subgraph {name} created with success!")
-        elif node_list:
-            self.subgraphs[name] = self.graph.subgraph(node_list)
-        
-        if return_node_list:
-            return self.subgraphs[name].nodes
-        
-    def delete_subraph(self, name: str):
-        if name not in  self.subgraphs.keys():
-            del self.subgraphs[name]
-        else:
-            print(f"{name} isn't in.subgraphs")
-            
-    def filter_subgraph(self, 
-            subgraph_name: str,
-            filter_func: Union[Callable[..., Any], str],
-            name: Union[str, None] = None, 
-            return_node_list: bool = False):
-           
-        nodes = [i for i in self.subgraphs[subgraph_name].nodes if filter_func(i)]
-        if name:
-            self.subgraphs[name] = self.subgraphs[subgraph_name].subgraph(nodes)
-        else:
-            self.subgraphs[subgraph_name] = self.subgraphs[subgraph_name].subgraph(nodes)
-        
-        if return_node_list:
-            return self.subgraphs[name].nodes if name != None else self.subgraphs[subgraph_name].nodes
-        
-    def join_subgraph(self, name: str, graphs_name: list, return_node_list: bool = False):
-        if name in self.subgraphs.keys():
-            print(f"You already have this subgraph created. Use graph.delete_subraph({name}) before creating it again.")
-        elif set(graphs_name).issubset(self.subgraphs.keys()):
-            
-            self.subgraphs[name] = self.graph.subgraph([node for i in graphs_name for node in self.subgraphs[i].nodes])
-            if return_node_list:
-                return self.subgraphs[name].nodes
-        else:
-            print(f"Some of your subgraph isn't in the subgraph list")
-        
         
         
         

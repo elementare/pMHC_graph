@@ -3,6 +3,7 @@ from graphein.protein.config import ProteinGraphConfig
 from graphein.protein.edges.distance import add_distance_threshold
 from graphein.protein.features.nodes.dssp import rsa, secondary_structure
 from graphein.protein.config import DSSPConfig
+import json
 
 def make_graph_config(centroid_threshold):
     return ProteinGraphConfig(
@@ -11,3 +12,11 @@ def make_graph_config(centroid_threshold):
         dssp_config=DSSPConfig(),
         granularity="centroids"
     )
+
+def parse_serd_config(json_path: str):
+    with open(json_path, "r") as f:
+        data = json.load(f)       
+
+
+
+
