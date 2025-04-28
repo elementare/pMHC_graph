@@ -155,7 +155,6 @@ def create_graphs(args):
                 selected_files.append(file_info)
     
     Path(args.output_path).mkdir(parents=True, exist_ok=True)
-    
     graph_config = make_graph_config(centroid_threshold=args.centroid_threshold)
     
     graphs = []
@@ -167,10 +166,10 @@ def create_graphs(args):
         
         graph_instance = Graph(config=graph_config, graph_path=file_info["input_path"])
         
-        start_time = time.time()
+        # start_time = time.time()
 
-        depth = calculate_residue_depth(pdb_file_path=file_info["input_path"], serd_config=args.serd_config)
-        logger.debug(f"Depth calculated in {time.time() - start_time} seconds")
+        # depth = calculate_residue_depth(pdb_file_path=file_info["input_path"], serd_config=args.serd_config)
+        # logger.debug(f"Depth calculated in {time.time() - start_time} seconds")
         
         selection_params = residues_data.get(file_info["name"], {})
         if "base" in selection_params:
@@ -181,7 +180,7 @@ def create_graphs(args):
             rsa_filter=args.rsa_filter,
             selection_params=selection_params
         )
-        subgraph.residue_depth = depth
+        # subgraph.residue_depth = depth
         
         graphs.append((subgraph, file_info["input_path"]))
     

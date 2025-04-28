@@ -31,7 +31,7 @@ class Graph:
         :param config: Custom configuration for the protein graph.
         """
         self.config = config or ProteinGraphConfig(
-            edge_construction_functions=[partial(add_distance_threshold, long_interaction_threshold=0, threshold=10)],
+            edge_construction_functions=[partial(add_distance_threshold, long_interaction_threshold=0, threshold=10.0)],
             graph_metadata_functions=[rsa, secondary_structure],
             dssp_config=DSSPConfig(),
             granularity="centroids"
@@ -166,7 +166,7 @@ class AssociatedGraph:
                 "residue_map": residue_map,
                 "residue_map_all": residue_map_all,
                 "rsa": np.array(g.graph["dssp_df"]["rsa"]),
-                "residue_depth": g.residue_depth
+                # "residue_depth": g.residue_depth
             }
             graph_data.append(data)
         return graph_data
@@ -175,31 +175,94 @@ class AssociatedGraph:
     def add_spheres(self):
         ...
         
-    def draw_graph(self, show = True, save = True):
+  #   def draw_graph(self, show = True, save = True):
+  #       if not show and not save:
+  #           log.info("You are not saving or viewing the graph. Please leave at least one of the parameters as true.")
+  #           return 
+  #       if isinstance(self.associated_graphs, list):
+  #           for i, graph in enumerate(self.associated_graphs):
+
+  #               chain_ids = sorted({data['chain_id'] for _, data in graph.nodes(data=True)})
+  #               cmap = plt.cm.get_cmap('tab10', len(chain_ids))
+  #               palette = {cid: cmap(idx) for idx, cid in enumerate(chain_ids)}
+  #               node_colors = [palette[graph.nodes[n]['chain_id']] for n in graph.nodes]
+  #               # Draw the full cross-reactive subgraph
+  #               nx.draw(graph, with_labels=True, node_color=node_colors, node_size=50, font_size=6)
+  #               
+  #               if show:
+  #                   plt.show()
+  #               if save:
+  #                   if i == 0:
+  #                       plt.savefig(path.join(self.output_path, "Associated Graph Base.png"))
+  #                   else:
+
+  #                       plt.savefig(path.join(self.output_path, f"Associated Graph {i}.png"))
+  #                   plt.clf()
+  #       
+  #                   log.info(f"{i} GraphAssociated's plot saved in {self.output_path}")
+  #       else:
+  #           log.warning(f"I cant draw the graph because it's {self.associated_graphs}")
+  # 
+
+    def draw_graph(self, show=True, save=True):
         if not show and not save:
             log.info("You are not saving or viewing the graph. Please leave at least one of the parameters as true.")
-            return 
-        if isinstance(self.associated_graphs, list):
-            for i, graph in enumerate(self.associated_graphs):
+            return
 
-                node_colors = [graph.nodes[node]['chain_id'] for node in graph.nodes]
-                # Draw the full cross-reactive subgraph
-                nx.draw(graph, with_labels=True, node_color=node_colors, node_size=50, font_size=6)
-                
-                if show:
-                    plt.show()
-                if save:
-                    if i == 0:
-                        plt.savefig(path.join(self.output_path, "Associated Graph Base.png"))
-                    else:
+        if not isinstance(self.associated_graphs, list):
+            log.warning(f"I can't draw the graph because it's {self.associated_graphs!r}")
+            return
 
-                        plt.savefig(path.join(self.output_path, f"Associated Graph {i}.png"))
-                    plt.clf()
-        
-                    log.info(f"{i} GraphAssociated's plot saved in {self.output_path}")
-        else:
-            log.warning(f"I cant draw the graph because it's {self.associated_graphs}")
-  
+        for i, graph in enumerate(self.associated_graphs):
+            # 1) Assign a chain_id to each node (hard‑coded example = "AAAA")
+            for node in graph.nodes():
+                # if you want to compute from the residues, do something like:
+                residues = [r for r in node]  # flatten
+                chains = [r.split(':')[0] for r in residues]
+                graph.nodes[node]['chain_id'] = ''.join(chains)
+
+            # 2) Build color palette
+            chain_ids = sorted({data['chain_id'] for _, data in graph.nodes(data=True)})
+            cmap = plt.cm.get_cmap('tab10', len(chain_ids))
+            palette = {cid: cmap(idx) for idx, cid in enumerate(chain_ids)}
+            node_colors = [palette[graph.nodes[n]['chain_id']] for n in graph.nodes()]
+
+            # 3) Build the labels exactly as you asked:
+            node_labels = {}
+            for n in graph.nodes():
+                if isinstance(n, tuple) and n and isinstance(n[0], tuple):
+                    combo1, combo2 = n
+                    # repr gives "('A:GLU:161', 'A:ARG:157', 'A:VAL:158')"
+                    # strip spaces so you get "('A:GLU:161','A:ARG:157','A:VAL:158')"
+                    lab1 = repr(combo1).replace(" ", "")
+                    lab2 = repr(combo2).replace(" ", "")
+                    node_labels[n] = f"{lab1}{lab2}"
+                else:
+                    node_labels[n] = str(n)
+
+            # 4) Draw it
+            nx.draw(
+                graph,
+                with_labels=True,
+                labels=node_labels,
+                node_color=node_colors,
+                node_size=50,
+                font_size=6
+            )
+
+            # 5) Show/save
+            if show:
+                plt.show()
+            if save:
+                filename = (
+                    "Associated Graph Base.png" if i == 0
+                    else f"Associated Graph {i}.png"
+                )
+                full = path.join(self.output_path, filename)
+                plt.savefig(full)
+                plt.clf()
+                log.info(f"{i}‑th associated graph saved to {full}")
+
     def grow_subgraph_bfs(self):
         # Build all possible common TCR interface pMHC subgraphs centered at the peptide nodes 
         count_pep_nodes = 0
