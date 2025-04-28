@@ -1,6 +1,7 @@
 from Bio.PDB import *
+from collections import defaultdict
 import numpy as np
-import textdistance
+from itertools import product
 from Bio.PDB.vectors import Vector
 from Bio.PDB.Atom import Atom
 from Bio.PDB.Residue import Residue
@@ -11,19 +12,15 @@ import pandas as pd
 from collections import Counter
 from typing import Any, FrozenSet, Tuple, List, Optional, Union, Dict, Set
 import itertools
-import logging, sys
-from copy import deepcopy
-from scipy.special import factorial
-from tqdm import tqdm
+import logging
 import matplotlib.pyplot as plt
 from utils.cutils.combinations_filter import filtered_combinations
 from classes.classes import StructureSERD
 import matplotlib.pyplot as plt
-import seaborn as sns
 from itertools import combinations
 from sklearn.metrics.pairwise import cosine_similarity
 import json
-import os
+import math
 
 log = logging.getLogger("CRSProtein")
 
@@ -321,7 +318,7 @@ def convert_node_to_residue(node, residue_maps_unique: Dict):
     
     return converted_node
 
-def convert_edges_to_residues(edges: Set[FrozenSet], maps: Dict, idMap: int) -> Tuple[List, List]:
+def convert_edges_to_residues(edges: Set[FrozenSet], maps: Dict, debug: bool = False) -> Tuple[List, List]:
     """Convert the edges that contains tuple of indices to tuple of residues
 
     Args:
@@ -335,25 +332,26 @@ def convert_edges_to_residues(edges: Set[FrozenSet], maps: Dict, idMap: int) -> 
     #     list_edge = list(edge)
     #     edges_indices_base.append(tuple((possible_nodes_map[list_edge[0]], possible_nodes_map[list_edge[1]])))
 
+    original_edges = []
     edges_indices = []
     converted_edges = []
     residue_maps_unique = maps["residue_maps_unique"]
-    possible_nodes_map = maps[idMap]["possible_nodes"] 
+    possible_nodes_map = maps["possible_nodes"] 
     for edge in edges:
         edge_list = list(edge)
         node1, node2 = possible_nodes_map[edge_list[0]], possible_nodes_map[edge_list[1]]
-
         converted_node1 = tuple(f"{residue_maps_unique[idx][0]}:{residue_maps_unique[idx][2]}:{residue_maps_unique[idx][1]}" for idx in node1)
         converted_node2 = tuple(f"{residue_maps_unique[idx][0]}:{residue_maps_unique[idx][2]}:{residue_maps_unique[idx][1]}" for idx in node2)
 
         converted_node1_indice = tuple(idx for idx in node1)
         converted_node2_indice = tuple(idx for idx in node2)
         if set(converted_node1) != set(converted_node2) and check_cross_positions((converted_node1, converted_node2)):
+            original_edges.append(edge)
             edges_indices.append((converted_node1_indice, converted_node2_indice))
             converted_edges.append((converted_node1, converted_node2))
-        # else:
-        #     log.debug(f'Invalid edge: {edge}, {converted_node1}:{converted_node2}')
-    return edges_indices, converted_edges
+        else:
+            if debug: log.debug(f'Invalid edge: {edge}, {converted_node1}:{converted_node2}')
+    return original_edges, edges_indices, converted_edges
 
 def convert_residues_to_indices(residue_edges: List[Tuple[Tuple, Tuple]], residue_maps_unique: Dict) -> List[Tuple[Tuple, Tuple]]:
     """Converte edges no formato de resíduos para índices numéricos.
@@ -410,7 +408,7 @@ def filter_maps_by_nodes(data: dict,
     contact_maps = data["contact_maps"]
     rsa_maps = data["rsa_maps"]
     residue_maps = data["residue_maps"]
-    depths_maps = data["depths_maps"]
+    depths_maps = data["residue_maps"]
     nodes_graphs = data["nodes_graphs"]
     
     maps = {"full_residue_maps": [], "residue_maps_unique": {}}
@@ -422,8 +420,8 @@ def filter_maps_by_nodes(data: dict,
     for contact_map, rsa_map, depth_map, residue_map, nodes in zip(
             contact_maps, rsa_maps, depths_maps, residue_maps, nodes_graphs):
         
-        depth_map["ResidueNumber"] = depth_map["ResidueNumber"].astype(int)
-        depth_map["Chain"] = depth_map["Chain"].astype(str)
+        # depth_map["ResidueNumber"] = depth_map["ResidueNumber"].astype(int)
+        # depth_map["Chain"] = depth_map["Chain"].astype(str)
         
         indices = []
         indices_depth = []
@@ -438,14 +436,14 @@ def filter_maps_by_nodes(data: dict,
             key = (chain, int(res_num_str), res_name)
             if key in residue_map:
                 indices.append(residue_map[key])
-                indices_depth.append((int(res_num_str), chain))
+                # indices_depth.append((int(res_num_str), chain))
         
-        for i, idx in enumerate(indices_depth):
-            residue_in_depth = depth_map[
-                (depth_map["ResidueNumber"] == idx[0]) & (depth_map["Chain"] == idx[1])
-            ]
-            if residue_in_depth.empty:
-                logger.warning(f"No matching residue in depth map for index {i}: {idx}")
+        # for i, idx in enumerate(indices_depth):
+        #     residue_in_depth = depth_map[
+        #         (depth_map["ResidueNumber"] == idx[0]) & (depth_map["Chain"] == idx[1])
+        #     ]
+        #     if residue_in_depth.empty:
+        #         logger.warning(f"No matching residue in depth map for index {i}: {idx}")
         
         pruned_map = contact_map[np.ix_(indices, indices)]
         np.fill_diagonal(pruned_map, np.nan)
@@ -457,11 +455,11 @@ def filter_maps_by_nodes(data: dict,
         
         thresholded_rsa_maps.append(rsa_map[indices])
         
-        filtered_depth = depth_map[
-            depth_map.apply(lambda row: (row["ResidueNumber"], row["Chain"]) in indices_depth, axis=1)
-        ]
-        filtered_depth = filtered_depth.set_index(["ResidueNumber", "Chain"]).reindex(indices_depth).reset_index()
-        thresholded_depth_maps.append(filtered_depth["ResidueDepth"].to_numpy())
+        # filtered_depth = depth_map[
+        #     depth_map.apply(lambda row: (row["ResidueNumber"], row["Chain"]) in indices_depth, axis=1)
+        # ]
+        # filtered_depth = filtered_depth.set_index(["ResidueNumber", "Chain"]).reindex(indices_depth).reset_index()
+        # thresholded_depth_maps.append(filtered_depth["ResidueDepth"].to_numpy())
         
         full_res_map = {}
         for i, node in enumerate(nodes):
@@ -478,7 +476,7 @@ def filter_maps_by_nodes(data: dict,
         matrices_dict["pruned_contact_maps"] = pruned_contact_maps
         matrices_dict["thresholded_contact_maps"] = thresholded_contact_maps
         matrices_dict["thresholded_rsa_maps"] = thresholded_rsa_maps
-        matrices_dict["thresholded_depth_maps"] = thresholded_depth_maps
+        matrices_dict["thresholded_depth_maps"] = None
     
     return matrices_dict, maps
 
@@ -564,17 +562,19 @@ def discrete_distances(distance, n_divisions, threshold):
     
     if distance <= 0 or distance > threshold:
         return None
+
+    class_distance = math.ceil(distance / length_division)
     
-    class_distance = int((distance - 1e-9) // length_division) + 1
     
     return class_distance
 
 def find_triads(G, contact_map, residue_map, residues_classes, threshold):
     triads = {}
+
+    n_nodes = len(G.nodes())
     
     for center in G.nodes():
-        neighbors = [n for n in G.neighbors(center) if n != center]
-        
+        neighbors = {n for n in G.neighbors(center) if n != center}
         for u, w in combinations(neighbors, 2):
             outer_sorted = tuple(sorted([u, w]))
             u_split, center_split, w_split = outer_sorted[0].split(":"), center.split(":"), outer_sorted[1].split(":")
@@ -594,16 +594,28 @@ def find_triads(G, contact_map, residue_map, residues_classes, threshold):
             d3_discrete = discrete_distances(d3, 5, threshold)
             
             if None not in [d1_discrete, d2_discrete, d3_discrete]:
-                triad = (u_class, center_class, w_class, d1_discrete, d2_discrete, d3_discrete)
+                triad = (u_res, center_res, w_res, d1_discrete, d2_discrete, d3_discrete)
                 if triad not in triads.keys():
                     triads[triad] = {
                         "count": 1,
-                        "triads_full": [(outer_sorted[0], center, outer_sorted[1], d1, d2, d3)]
+                        "triads_full": [(outer_sorted[0], center, outer_sorted[1], d1_discrete, d2_discrete, d3_discrete)]
                     }
                 else:
+                    
                     triads[triad]["count"] += 1
-                    triads[triad]["triads_full"].append((outer_sorted[0], center, outer_sorted[1], d1, d2, d3))
-       
+                    triads[triad]["triads_full"].append((outer_sorted[0], center, outer_sorted[1], d1_discrete, d2_discrete, d3_discrete))
+    n_triad = 0
+    counters = {}
+    for triad in triads.keys():
+        n_triad += triads[triad]["count"]
+        if triads[triad]["count"] not in counters.keys():
+            counters[triads[triad]["count"]] = 1
+        else:
+            counters[triads[triad]["count"]] += 1
+    
+    print(f"N Nodes: {n_nodes}, N Triad: {n_triad}, Unique Triad: {len(triads.keys())}")
+    print(f"Counters: {counters}")
+    
     return triads
 
 
@@ -645,6 +657,251 @@ def create_residues_classes(path, residues_similarity_cutoff):
 
     return residue_to_class
 
+def cross_protein_triads(triads_per_protein):
+    """
+    Parameters
+    ----------
+    triads_per_protein : list[dict]
+        Each dict is the `triads` object you already create for one protein.
+        Keys  -> token tuples, e.g. ('C1','C2','C4',3,10,3)
+        Values -> {"count": int, "triads_full": [triplet tuples …]}
+
+    Returns
+    -------
+    dict
+        token -> list of combinations, where each combination contains
+                 exactly one element from each protein’s `triads_full`.
+                 Example length‑3 combination:
+                 (
+                   ('A:ALA:15', 'A:LYS:17', 'A:LEU:20', 1, 5, 10),  # protein‑1
+                   ('B:ALA:33', 'B:LYS:35', 'B:LEU:39', 1, 5, 10),  # protein‑2
+                   ('C:ALA:7',  'C:LYS:12', 'C:LEU:19', 1, 5, 10)   # protein‑3
+                 )
+    """
+    # Tokens present in *all* proteins
+    common_tokens = set.intersection(*(set(t.keys()) for t in triads_per_protein))
+    cross_combos = {}
+    for token in common_tokens:
+        triad_lists = [prot_triads[token]["triads_full"] for prot_triads in triads_per_protein]
+        cross_combos[token] = list(itertools.product(*triad_lists))  # full Cartesian product
+     
+    return cross_combos
+
+def tokens_compatible(t1, t2):
+    """
+    (your existing compatibility check — unchanged)
+    """
+    (A, B, C, d1, d2, d3) = t1
+    (X, Y, Z, e1, e2, e3) = t2
+
+    cnt1 = Counter([A, B, C])
+    cnt2 = Counter([X, Y, Z])
+    shared = cnt1 & cnt2
+    if sum(shared.values()) != 2:
+        return False
+    if shared[B] == 0 or shared[Y] == 0:
+        return False
+
+    # distances must match on the shared pair
+    def pair_dist(a, b, d1, d2, d3):
+        key = tuple(sorted((a, b)))
+        return { tuple(sorted((A, B))): d1,
+                 tuple(sorted((A, C))): d2,
+                 tuple(sorted((B, C))): d3 }.get(key)
+
+    shared_elems = list(shared.elements())
+    key = tuple(sorted(shared_elems))
+    return pair_dist(A, B, d1, d2, d3) == pair_dist(X, Y, e1, e2, e3)
+
+def build_token_compatibility(cross_combos):
+    """
+    Pattern‐indexed compatibility:
+
+      • We generate 8 “wildcard” patterns per token:
+          (resA, resB, *, dAB, *, *), (resB, resA, *, dAB, *, *),
+          (*, resA, resB, *, *, dAB), (*, resB, resA, *, *, dAB),
+          (resC, resB, *, dBC, *, *), ... etc.
+
+      • We invert them into a pattern→tokens index in O(t·p).
+
+      • For each token, we union its 8 patterns’ token‐lists to get a small
+        candidate set, then run your exact `tokens_compatible` only on those.
+    """
+    tokens = list(cross_combos.keys())
+    pattern_map    = defaultdict(set)
+    token_patterns = {}
+
+    for t in tokens:
+        A, B, C, d1, d2, d3 = t
+        pats = [
+            (A,    B,    None, d1, None, None),
+            (B,    A,    None, d1, None, None),
+            (None, A,    B,    None, None, d1),
+            (None, B,    A,    None, None, d1),
+
+            (C,    B,    None, d3, None, None),
+            (B,    C,    None, d3, None, None),
+            (None, B,    C,    None, None, d3),
+            (None, C,    B,    None, None, d3),
+        ]
+        token_patterns[t] = pats
+        for p in pats:
+            pattern_map[p].add(t)
+    
+    compat = defaultdict(list)
+    for t1 in tokens:
+        candidates = set()
+        for p in token_patterns[t1]:
+            candidates |= pattern_map[p]
+        
+        compat[t1] = [c for c in candidates if c != t1]
+    return compat
+
+
+def build_combos_graph(cross_combos):
+    nodes, edges, locator = [], set(), {}
+    nid = 0
+    for token, combos in cross_combos.items():
+        for idx, combo in enumerate(combos):
+            locator[(token, idx)] = nid
+            nodes.append({"id": nid, "token": token, "combo": combo})
+            nid += 1
+
+    compat = build_token_compatibility(cross_combos)
+    seen = set()
+
+    def shared_distance(tri, idx_pair):
+        if idx_pair == (0,1):
+            return tri[3]
+        elif idx_pair == (1,2):
+            return tri[5]
+        else:
+            raise AssertionError(f"Unexpected shared indices {idx_pair}, center must be shared")
+
+    for t1, comp_list in compat.items():
+        for t2 in comp_list:
+            if (t2, t1) in seen:
+                continue
+            seen.add((t1, t2))
+
+            c1_list, c2_list = cross_combos[t1], cross_combos[t2]
+            iterator = (
+                combinations(range(len(c1_list)), 2)
+                if t1 == t2 else product(range(len(c1_list)), range(len(c2_list)))
+            )
+
+            for i, j in iterator:
+                combo1, combo2 = c1_list[i], c2_list[j]
+                first_idx_pair = None
+                valid = True
+
+                for tri1, tri2 in zip(combo1, combo2):
+                    shared = set(tri1[:3]) & set(tri2[:3])
+                    if len(shared) != 2 or tri1[1] not in shared or tri2[1] not in shared:
+                        valid = False
+                        break
+
+                    idx1 = tuple(sorted(k for k,v in enumerate(tri1[:3]) if v in shared))
+                    idx2 = tuple(sorted(k for k,v in enumerate(tri2[:3]) if v in shared))
+                    if first_idx_pair is None:
+                        first_idx_pair = (idx1, idx2)
+
+                    elif (idx1, idx2) != first_idx_pair:
+                        valid = False
+                        break
+
+                    d1 = shared_distance(tri1, idx1)
+                    d2 = shared_distance(tri2, idx2)
+                    if d1 != d2:
+                        valid = False
+                        break
+
+                if not valid:
+                    continue
+               
+                u1, c1, w1 = [], [], []
+                u2, c2, w2 = [], [], []
+                for tr1, tr2 in zip(combo1, combo2):
+                    u1.append(tr1[0])
+                    c1.append(tr1[1])
+                    w1.append(tr1[2])
+
+                    u2.append(tr2[0])
+                    c2.append(tr2[1])
+                    w2.append(tr2[2])
+                
+                u1, c1, w1 = tuple(u1), tuple(c1), tuple(w1)
+                u2, c2, w2 = tuple(u2), tuple(c2), tuple(w2)
+    
+                for a, b in ((c1, u1), (c1, w1), (c2, u2), (c2, w2)):
+                    if a == b:
+                        continue
+                    edge = tuple(sorted((a,b)))
+                    edges.add(edge)
+                # edges.add(frozenset((center1, u1)))
+                # edges.add(frozenset((center1, w1)))
+                # edges.add(frozenset((center2, u1)))
+                # edges.add(frozenset((center2, w2)))
+
+    # return {"nodes": nodes, "edges": edges}
+    return edges
+
+def _combo_label(combo, as_string=True):
+    """
+    Parameters
+    ----------
+    combo : tuple  # (triad_p1, triad_p2, …)
+    as_string : bool
+        • True  → "(A:ALA:4, A:LEU:3, A:LYS:3)(B:…)"  ← human‑readable
+        • False → ((A:ALA:4, A:LEU:3, A:LYS:3), (B:…)) ← tuple of tuples
+
+    Returns
+    -------
+    hashable object that can be used as a NetworkX node id
+    """
+    triads_no_dist = tuple(triad[:3] for triad in combo)   # drop d1,d2,d3
+    if as_string:
+        return ''.join(f"({', '.join(triad)})" for triad in triads_no_dist)
+    return triads_no_dist            # still hashable (nested tuples)
+
+
+def dict_to_nx_by_combo(g_dict, string_labels=True):
+    """
+    Convert the triad‑graph dictionary to a NetworkX graph whose
+    *node id* is the association node without distances.
+
+    Parameters
+    ----------
+    g_dict        : output of build_global_triad_graph_optimised
+    string_labels : if True, node ids are human‑readable strings;
+                    if False, they are tuples of tuples.
+
+    Returns
+    -------
+    networkx.Graph
+    """
+    G = nx.Graph()
+    id2label = {}
+
+    # ─── add nodes ────────────────────────────────────────────
+    for node in g_dict["nodes"]:
+        label = _combo_label(node["combo"], as_string=string_labels)
+        id2label[node["id"]] = label
+        G.add_node(
+            label,
+            token=node["token"],
+            combo=node["combo"],
+            chain_id=_extract_chain_id(node["combo"])
+        )
+
+    # ─── add edges ────────────────────────────────────────────
+    for edge in g_dict["edges"]:
+        u = id2label[edge["node1"]]
+        v = id2label[edge["node2"]]
+        G.add_edge(u, v, patterns=edge["patterns"])
+
+    return G
+
 def triads_to_dataframe(triads_list: list) -> pd.DataFrame:
     all_keys = set()
     for triads in triads_list:
@@ -661,6 +918,134 @@ def triads_to_dataframe(triads_list: list) -> pd.DataFrame:
     
     return df
 
+def _extract_chain_id(combo):
+    """
+    combo = (triad_p1, triad_p2, …)
+    triad_pX = ('A:ALA:4', 'A:LEU:3', 'A:LYS:3', d1, d2, d3)
+
+    Return a string such as 'A' (single protein) or 'A|B|C' (one per protein).
+    """
+    chains = []
+    for triad in combo:
+        first_res = triad[0]           # e.g. 'A:ALA:4'
+        chain = first_res.split(':')[0]
+        chains.append(chain)
+    return '|'.join(chains)            # hashable & human‑readable
+
+def create_distance_matrix_final(
+    nodes: List[Tuple],
+    matrices: dict,
+    maps: dict,
+    distance_threshold: float,
+    std_threshold: float
+):
+    """
+    nodes : list of n-tuples, each (R1, R2, …, Rn) strings "Chain:ResName:ResNum"
+    matrices : dict containing:
+      • "dm_pruned"      : global M×M array of raw distances
+      • "dm_thresholded" : global M×M array, NaN where distance > cutoff
+    maps : dict containing:
+      • "residue_maps_unique_break": dict k→{ global_idx → (chain, num, resname) }
+    distance_threshold : float, max allowed raw distance for dm_possible
+    std_threshold : float, max allowed std deviation to keep adj_possible
+    """
+
+    dm_pruned    = matrices["dm_pruned"]
+    dm_threshold = matrices["dm_thresholded"]
+
+    N = len(nodes)
+    F = len(nodes[0])
+
+    dm_possible = np.zeros((N, N), dtype=float)
+    dm_std      = np.zeros((N, N), dtype=float)
+    adj         = np.zeros((N, N), dtype=float)
+
+    for i, j in combinations(range(N), 2):
+        pruned_dists = []
+        thresh_dists = []
+        ok_pruned    = True
+
+        for k in range(F):
+            Ra, Rb = nodes[i][k], nodes[j][k]
+
+            dp = dm_pruned[Ra, Rb]
+            dt = dm_threshold[Ra, Rb]
+
+            pruned_dists.append(dp)
+            thresh_dists.append(dt)
+
+            # check raw distance threshold
+            if np.isnan(dp) or dp > distance_threshold:
+                ok_pruned = False
+
+        # compute std dev of raw distances (ignoring NaNs)
+        s = float(np.nanstd(pruned_dists, ddof=0))
+        dm_std[i, j] = dm_std[j, i] = s
+
+        # mark possible if all raw distances within threshold
+        if ok_pruned:
+            dm_possible[i, j] = dm_possible[j, i] = 1.0
+
+        # mark adjacency if possible AND all thresholded distances exist AND std within limit
+        if ok_pruned and not np.isnan(s) and s <= std_threshold:
+            if all(not np.isnan(dt) for dt in thresh_dists):
+                adj[i, j] = adj[j, i] = 1.0
+
+    # build return structures
+    matrices_out = {
+        "dm_possible_nodes":  dm_possible,
+        "dm_std":             dm_std,
+        "adj_possible_nodes": adj
+    }
+
+    maps_out = maps.copy()
+    possible = {}
+    for idx, node in enumerate(nodes):
+        possible[idx]       = node
+        possible[str(node)] = idx
+    maps_out["possible_nodes"] = possible
+
+    return matrices_out, maps_out
+
+def create_std_matrix(nodes, matrices: dict, maps: dict, threshold: float = 3.0):
+    dim = len(nodes[0])
+    K = len(nodes) 
+    
+    stacked_pruned  = np.empty((dim, K, K))
+    stacked_thresh  = np.empty_like(stacked_pruned)
+    for p in range(dim):
+        idx = [node[p] for node in nodes]
+        for i in range(K):
+            stacked_pruned[p,  i, :] = matrices["dm_pruned"][idx[i],  idx]
+            stacked_thresh[p, i, :]  = matrices["dm_thresholded"][idx[i], idx]
+     
+    var_pruned = np.std(stacked_pruned, axis=0)    
+    var_thresh = np.std(stacked_thresh, axis=0)          
+
+    mask_valid = (0 < var_pruned) & (var_pruned < threshold)
+    mask_invalid = ~mask_valid
+    var_pruned[mask_valid] = 1
+    var_pruned[mask_invalid] = np.nan
+
+    mask_valid = (0 < var_thresh) & (var_thresh < threshold)
+    mask_invalid = ~mask_valid
+    var_thresh[mask_valid] = 1
+    var_thresh[mask_invalid] = np.nan
+ 
+    new_matrices = {
+        "dm_possible_nodes": var_pruned,
+        "adj_possible_nodes": var_thresh
+    }
+    
+    maps_out = {}
+    maps_out["possible_nodes"] = {}
+    for i, node in enumerate(nodes):
+        maps_out["possible_nodes"][i]      = node
+        maps_out["possible_nodes"][str(node)] = i
+    maps["possible_nodes"] = maps_out["possible_nodes"]
+    
+    return new_matrices, maps
+
 def association_product(graph_data: list,
                         association_mode: str,
                         config: dict,
@@ -676,13 +1061,176 @@ def association_product(graph_data: list,
         "contact_maps": [gd["contact_map"] for gd in graph_data],
         "residue_maps_all": [gd["residue_map_all"] for gd in graph_data],
         "rsa_maps": [gd["rsa"] for gd in graph_data],
-        "depths_maps": [gd["residue_depth"] for gd in graph_data],
+        # "depths_maps": [gd["residue_depth"] for gd in graph_data],
         "nodes_graphs": [sorted(list(gd["graph"].nodes())) for gd in graph_data]
     }
     
-    df = triads_to_dataframe(graph_collection["triads"])
-    print(df)
-    print(sum(df.prod(axis=1)))
+    ranges_graph = indices_graphs(graph_collection["graphs"])
+    total_length = sum(len(g.nodes()) for g in graph_collection["graphs"])
+    metadata = {
+        "total_length": total_length,
+        "ranges_graph": ranges_graph
+    }
+ 
+    
+    matrices_dict = {
+        "type": 0,
+        "neighbors": None,
+        "rsa": None,
+        "identity": None,
+        "depth": None,
+        "associated": None,
+        "similarity": None,
+        "dm_thresholded": None,
+        "dm_pruned": None,
+        "metadata": metadata
+    }
+    
+    # Prepare filtering input; filter_maps_by_nodes now updates matrices_dict and returns maps.
+    filter_input = {
+        "contact_maps": graph_collection["contact_maps"],
+        "rsa_maps": graph_collection["rsa_maps"],
+        "residue_maps": graph_collection["residue_maps_all"],
+        # "depths_maps": graph_collection["depths_maps"],
+        "nodes_graphs": graph_collection["nodes_graphs"]
+    }
+    
+    logger.info("Creating pruned and thresholded arrays...")
+    matrices_dict, maps = filter_maps_by_nodes(filter_input,
+                                            distance_threshold=config["centroid_threshold"],
+                                            matrices_dict=matrices_dict)
+    logger.info("Arrays created successfully!")
+
+    prot_all_res = np.array([node.split(":")[1]
+                            for node_graph in graph_collection["nodes_graphs"]
+                            for node in node_graph])
+    current_value = 0
+    maps["residue_maps_unique_break"] = {} 
+    for i, res_map in enumerate(maps["full_residue_maps"]):
+        maps["residue_maps_unique"].update({val + current_value: key for key, val in res_map.items()})
+        maps["residue_maps_unique_break"][i] = {val + current_value: key for key, val in res_map.items()}
+        current_value += len(res_map)
+
+    inv_maps = {
+        k: { res: idx for idx, res in br.items() }
+        for k, br in maps["residue_maps_unique_break"].items()
+    }
+
+    current_index = 0
+
+    dm_thresh = np.zeros((metadata["total_length"], metadata["total_length"]))
+    dm_prune = np.zeros((metadata["total_length"], metadata["total_length"]))
+
+    for i, graph in enumerate(graph_collection["graphs"]):
+
+        graph_length = len(graph.nodes())
+        new_index = current_index + graph_length
+        dm_thresh[current_index:new_index, current_index:new_index] = matrices_dict["thresholded_contact_maps"][i]
+        dm_prune[current_index:new_index, current_index:new_index] = matrices_dict["pruned_contact_maps"][i]
+        current_index = new_index
+
+    matrices_dict["dm_thresholded"] = dm_thresh
+    matrices_dict["dm_pruned"] = dm_prune
+
+    cross_combos = cross_protein_triads(graph_collection["triads"])
+    triad_graph = build_combos_graph(cross_combos)
+    
+    tuple_edges = [tuple(edge) for edge in triad_graph]
+    log.debug(f"Number of edges: {len(tuple_edges)}")
+    G = nx.Graph()
+    G.add_edges_from(tuple_edges)
+    components = list(nx.connected_components(G))
+
+    Graphs = []
+    for comp_id, component in enumerate(components):
+        log.debug(f"Processing component {comp_id} with {len(component)} nodes")
+
+        subG = nx.Graph()
+        subG.add_nodes_from(component)
+
+        for u in component:
+            for v in G.neighbors(u):
+                if v in component:
+                    subG.add_edge(u, v)
+
+
+        dm_thresh_graph = np.zeros((metadata["total_length"], metadata["total_length"]))
+        for u, v in subG.edges():
+            for p, (res_u, res_v) in enumerate(zip(u, v)):
+                if res_u != res_v:
+                    split_res_u, split_res_v = res_u.split(":"), res_v.split(":")
+                    res_u_tuple = (split_res_u[0], int(split_res_u[2]), split_res_u[1])
+                    res_v_tuple = (split_res_v[0], int(split_res_v[2]), split_res_v[1])
+                    idx_u = inv_maps[p][res_u_tuple]
+                    idx_v = inv_maps[p][res_v_tuple]
+                    dm_thresh_graph[idx_u, idx_v] = dm_thresh[idx_u, idx_v]
+                    dm_thresh_graph[idx_v, idx_u] = dm_thresh[idx_v, idx_u]
+
+        
+        matrices_dict["dm_thresholded"] = dm_thresh_graph
+    
+        nodes = list(subG.nodes())
+        nodes_indices = []
+
+        for node in nodes:
+            node_converted = []
+            for k, res in enumerate(node):
+                res_split = res.split(":")
+                res_tuple = (res_split[0], int(res_split[2]), res_split[1])
+                res_indice = inv_maps[k][res_tuple]
+                node_converted.append(res_indice)
+            nodes_indices.append(node_converted)
+
+        matrices_mul, maps_mul = create_std_matrix(
+            nodes=nodes_indices,
+            matrices=matrices_dict,
+            maps=maps,
+            threshold=3,
+        )
+
+        frames = generate_frames(
+            matrices=matrices_mul,
+            maps=maps_mul,
+        )
+
+        Graphs.extend(create_graph(frames, typeEdge="edges_residues"))
+
+ #    nodes = list(G.nodes())
+ #    nodes_indices = []
+ #    for node in nodes:
+ #        node_converted = []
+ #        for k, res in enumerate(node):
+ #            res_split = res.split(":")
+ #            res_tuple = (res_split[0], int(res_split[2]), res_split[1])
+ #            res_indice = inv_maps[k][res_tuple]
+ #            node_converted.append(res_indice)
+ #        nodes_indices.append(node_converted)
+ # # 
+ #    matrices_mul, maps_mul = create_distance_matrix_final(
+ #        nodes             = nodes_indices,
+ #        matrices          = matrices_dict,       
+ #        maps              = maps,                
+ #        distance_threshold= 10,
+ #        std_threshold     = 0.5
+ #    )
+
+
+    # matrices_mul, maps_mul = create_variance_matrix(
+    #     nodes             = nodes_indices,
+    #     matrices          = matrices_dict,        
+    #     maps              = maps,                
+    #     threshold = 3,
+    # )
+    # frames = generate_frames(
+    #     matrices=matrices_mul,
+    #     maps=maps_mul,
+    # )
+
+    # Graphs = create_graph(frames, typeEdge="edges_residues")
+    # 
+    return {
+                "AssociatedGraph": Graphs
+        }
     input("Continuar?")
 
 
@@ -967,136 +1515,6 @@ def filter_intermediate_graphs(graphs: list, node_list):
     
     return filtered_graphs  
 
-def generate_edges_gpu(matrices: dict, maps: dict, idMatrices: int, use_gpu: bool = True):
-    import numpy as np
-    if use_gpu:
-        import cupy as cp
-        xp = cp
-    else:
-        xp = np
-
-    dm = xp.array(matrices[idMatrices]["dm_possible_nodes"])
-    xp.fill_diagonal(dm, 1)
-
-    adj = xp.array(matrices[idMatrices]["adj_possible_nodes"])
-    xp.fill_diagonal(adj, xp.nan)
-
-    i_idx, j_idx = xp.where(adj == 1)
-
-    if use_gpu:
-        pairs = xp.stack([i_idx, j_idx], axis=1)
-        pairs = xp.sort(pairs, axis=1)
-        pairs = cp.asnumpy(pairs)
-    else:
-        pairs = np.stack([i_idx, j_idx], axis=1)
-        pairs = np.sort(pairs, axis=1)
-
-    pairs = np.unique(pairs, axis=0)
-    edges = {frozenset(pair) for pair in pairs}
-
-    idx, res = convert_edges_to_residues(edges, maps, idMatrices)
-    return {0: {"edges_residues": res, "edges_indices": idx}}
-
-
-def generate_frames_gpu(matrices: dict, maps: dict, idMatrices: int, use_gpu: bool = True):
-    import numpy as np
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    if use_gpu:
-        import cupy as cp
-        xp = cp
-    else:
-        xp = np
-
-    dm = xp.array(matrices[idMatrices]["dm_possible_nodes"])
-    xp.fill_diagonal(dm, 1)
-
-    adj = xp.array(matrices[idMatrices]["adj_possible_nodes"])
-    xp.fill_diagonal(adj, xp.nan)
-
-    L = dm.shape[0]
-
-    def process_row(i):
-        local_edges = set()
-        row = adj[i]
-        inds = xp.where(row == 1)[0]
-        if inds.size:
-            row_i = xp.full(inds.shape, i)
-            if use_gpu:
-                pairs = xp.stack([row_i, inds], axis=1)
-                pairs = xp.sort(pairs, axis=1)
-                pairs = cp.asnumpy(pairs)
-            else:
-                pairs = np.stack([row_i, inds], axis=1)
-                pairs = np.sort(pairs, axis=1)
-            for pair in pairs:
-                local_edges.add(frozenset(pair))
-            stack = xp.concatenate([dm[i][None, :], dm[inds]], axis=0)
-            inter = xp.prod(stack, axis=0)
-            inter_set = set(np.where(xp.asnumpy(inter) == 1)[0])
-            local_frame = None
-            if len(inter_set) > 3:
-                nodes = np.array(list(inter_set))
-                sub_adj = adj[nodes][:, nodes]
-                sub_adj_cpu = cp.asnumpy(sub_adj) if use_gpu else np.array(sub_adj)
-                deg = np.sum(np.nan_to_num(sub_adj_cpu), axis=1)
-                valid_nodes = nodes[deg > 2]
-                valid_nodes_set = frozenset(valid_nodes)
-                if valid_nodes.size:
-                    mask = np.isin(nodes, valid_nodes)
-                    sub_adj_filtered = sub_adj_cpu[mask][:, mask]
-                    if sub_adj_filtered.size:
-                        valid_pairs = np.stack(np.where(sub_adj_filtered == 1), axis=1)
-                        if valid_pairs.shape[0] > 3:
-                            edges_inner = {frozenset(valid_nodes[pair]) for pair in valid_pairs}
-                            idx_inner, res_inner = convert_edges_to_residues(edges_inner, maps, idMatrices)
-                            local_frame = (valid_nodes_set, {"edges_residues": res_inner, "edges_indices": idx_inner})
-        else:
-            local_frame = None
-        return local_edges, local_frame
-
-    global_edges = set()
-    frames_dict = {}
-    unique_frames = set()
-
-    with ThreadPoolExecutor() as executor:
-        futures = {executor.submit(process_row, i): i for i in range(L)}
-        completed = 0
-        for future in as_completed(futures):
-            completed += 1
-            if completed % max(1, L // 100) == 0:
-                log.info(f"Processamento das edges: {completed / L * 100:.2f}% concluído")
-            local_edges, local_frame = future.result()
-            global_edges.update(local_edges)
-            if local_frame is not None:
-                valid_nodes_set, frame_data = local_frame
-                if valid_nodes_set not in unique_frames:
-                    unique_frames.add(valid_nodes_set)
-                    frames_dict[len(frames_dict) + 1] = frame_data
-
-    if use_gpu:
-        i_idx, j_idx = cp.where(adj == 1)
-        pairs = cp.stack([i_idx, j_idx], axis=1)
-        pairs = cp.sort(pairs, axis=1)
-        pairs = cp.asnumpy(cp.unique(pairs, axis=0))
-    else:
-        i_idx, j_idx = np.where(adj == 1)
-        pairs = np.stack([i_idx, j_idx], axis=1)
-        pairs = np.sort(pairs, axis=1)
-        pairs = np.unique(pairs, axis=0)
-    for pair in pairs:
-        global_edges.add(frozenset(pair))
-    idx_base, res_base = convert_edges_to_residues(global_edges, maps, idMatrices)
-    frame0 = {"edges_residues": res_base, "edges_indices": idx_base}
-
-    sorted_frames = sorted(frames_dict.items(), key=lambda item: len(item[1]["edges_indices"]), reverse=True)
-    frames = {i: frame_data for i, (_, frame_data) in enumerate(sorted_frames, start=1)}
-    frames[0] = frame0
-
-    log.info(f"Total de frames criados: {len(frames.keys())}")
-
-    return frames
-
-
 def generate_edges(matrices: Dict, maps: Dict, idMatrices: int):
     edges_dict = dict()
     edges_base = set()
@@ -1123,7 +1541,326 @@ def generate_edges(matrices: Dict, maps: Dict, idMatrices: int):
  
     return edges_dict
 
-def generate_frames(matrices: Dict, maps: Dict, idMatrices: int):
+def generate_frames(matrices, maps):
+    """
+    Extrai frames de arestas a partir das matrizes filtradas,
+    usando convert_edges_to_residues para montar edges_indices e edges_residues.
+    """
+    dm  = matrices["dm_possible_nodes"].copy()
+    adj = matrices["adj_possible_nodes"].copy()
+    np.fill_diagonal(dm,  1)
+    np.fill_diagonal(adj, np.nan)
+    K = dm.shape[0]
+
+    frames = {}
+
+    edges_base = set()
+    for i in range(K):
+        js = np.where(adj[i] == 1)[0]
+        for j in js:
+            edges_base.add(frozenset((i, j)))
+
+    edges_original_0, edges_idx_0, edges_res_0 = convert_edges_to_residues(edges_base, maps)
+    frames[0] = {
+        "edges_indices": edges_idx_0,
+        "edges_residues": edges_res_0
+    }
+
+    seen_edge_sets = set()
+    checked_node_sets = set()
+    k = 1
+
+    for i in range(K):
+        adj_i = np.where(adj[i] == 1)[0]
+        if adj_i.size == 0:
+            continue
+
+        inter = dm[i].copy()
+        for t in adj_i:
+            inter *= dm[t]
+        inter_idx = np.where(inter == 1)[0]
+        if inter_idx.size < 4:
+            continue
+
+        node_set = frozenset(inter_idx)
+        if node_set in checked_node_sets:
+            continue
+        checked_node_sets.add(node_set)
+
+        nodes_idx = np.array(list(node_set))
+        sub_adj = adj[nodes_idx][:, nodes_idx]
+        degrees = np.sum(np.nan_to_num(sub_adj), axis=1)
+        valid_mask = degrees > 2
+        if valid_mask.sum() < 4:
+            continue
+
+        valid_idx = nodes_idx[valid_mask]
+        filtered = sub_adj[valid_mask][:, valid_mask]
+
+        edges = {
+            frozenset((int(valid_idx[p]), int(valid_idx[q])))
+            for p, q in zip(*np.where(filtered == 1))
+        }
+        if len(edges) < 4:
+            continue
+
+        edge_key = frozenset(edges)
+        if edge_key in seen_edge_sets:
+            continue
+        seen_edge_sets.add(edge_key)
+
+        edges_original, edges_idx, edges_res = convert_edges_to_residues(edges, maps)
+
+        tempG = nx.Graph()
+        for edge_o in edges_original:
+            tempG.add_edge(*edge_o)
+        
+        connected_comps = list(nx.connected_components(tempG))
+
+        right_comp = None
+        for comp in connected_comps:
+            if i in comp:
+                right_comp = comp
+                break
+        else:
+            continue
+        
+        subG = tempG.subgraph(right_comp)
+
+        edges = set(list(subG.edges()))
+
+        edges_original, edges_idx, edges_res = convert_edges_to_residues(edges, maps, True)
+
+        frames[k] = {
+            "edges_indices": edges_idx,
+            "edges_residues": edges_res
+        }
+        k += 1
+
+    # reordena frames >0 pelos maiores primeiros (mantém frame 0)
+    others = sorted(
+        (fid for fid in frames if fid != 0),
+        key=lambda fid: len(frames[fid]["edges_indices"]),
+        reverse=True
+    )
+    ordered = {0: frames[0]}
+    for new_id, old_id in enumerate(others, start=1):
+        ordered[new_id] = frames[old_id]
+
+    return ordered
+
+def generate_frames_old_old(
+    matrices: Dict[str, np.ndarray],
+    maps: Dict[str, Any]
+) -> Dict[int, Dict[str, Set]]:
+    """
+    Extrai frames de arestas a partir das matrizes filtradas.
+
+    Usa `maps["residue_maps_unique"]` para traduzir cada índice
+    diretamente em um Residue = (chain, resnum, resname).
+    """
+
+    # 1) Carrega o mapa único de resíduos e os nós possíveis
+    residue_map     = maps["residue_maps_unique"]  # { idx: (chain, resnum, resname) }
+    possible_nodes  = {
+        k: tuple(v)
+        for k, v in maps["possible_nodes"].items()
+        if isinstance(k, int)
+    }
+
+    # 2) Índice → nó de resíduos reais e inverso
+    idx_to_node = {
+        idx: tuple(residue_map[i] for i in node_tuple)
+        for idx, node_tuple in possible_nodes.items()
+    }
+    node_to_idx = {node: idx for idx, node in idx_to_node.items()}
+
+    # 3) Prepara matrizes
+    dm  = matrices["dm_possible_nodes"].copy()
+    adj = matrices["adj_possible_nodes"].copy()
+    np.fill_diagonal(dm,  1)
+    np.fill_diagonal(adj, np.nan)
+    K = dm.shape[0]
+
+    # 4) Frame 0: todas as arestas diretas em adj
+    base_edges_res = set()
+    for i in range(K):
+        for j in np.where(adj[i] == 1)[0]:
+            a = idx_to_node[i]
+            b = idx_to_node[j]
+            base_edges_res.add((a, b))  # mantém direção i→j
+
+    base_edges_idx = {
+        (node_to_idx[a], node_to_idx[b])
+        for a, b in base_edges_res
+    }
+
+    frames = {
+        0: {
+            "edges_residues": base_edges_res,
+            "edges_indices":  base_edges_idx
+        }
+    }
+
+    # 5) Clusters / frames > 0
+    seen_edge_sets: Set[frozenset]    = set()
+    checked_node_sets: Set[frozenset] = set()
+    k = 1
+
+    for i in range(K):
+        adj_i = np.where(adj[i] == 1)[0]
+        if adj_i.size == 0:
+            continue
+
+        # interseção de reachability via dm == 1
+        inter = dm[i].copy()
+        for t in adj_i:
+            inter *= dm[t]
+        inter_idx = np.where(inter == 1)[0]
+        if inter_idx.size < 4:
+            continue
+
+        # conjunto de nós reais
+        node_set = frozenset(idx_to_node[idx] for idx in inter_idx)
+        if node_set in checked_node_sets:
+            continue
+        checked_node_sets.add(node_set)
+
+        # subgrafo restrito + filtrar grau > 2
+        nodes_idx  = np.array([node_to_idx[n] for n in node_set])
+        sub_adj    = adj[nodes_idx][:, nodes_idx]
+        degrees    = np.sum(np.nan_to_num(sub_adj), axis=1)
+        valid_mask = degrees > 2
+        if valid_mask.sum() < 4:
+            continue
+
+        valid_idx = nodes_idx[valid_mask]
+        filtered  = sub_adj[valid_mask][:, valid_mask]
+
+        # 5.1) Arestas em resíduos reais (i→j) sem ordenar
+        edges_res = {
+            (idx_to_node[int(valid_idx[p])],
+             idx_to_node[int(valid_idx[q])])
+            for p, q in zip(*np.where(filtered == 1))
+        }
+        if len(edges_res) < 4 or frozenset(edges_res) in seen_edge_sets:
+            continue
+        seen_edge_sets.add(frozenset(edges_res))
+
+        # 5.2) Conversão para índices
+        edges_idx = {
+            (node_to_idx[a], node_to_idx[b])
+            for a, b in edges_res
+        }
+        frames[k] = {
+            "edges_residues": edges_res,
+            "edges_indices":  edges_idx
+        }
+        k += 1
+
+    # 6) Reordena os frames >0 pelos maiores primeiro (mantém 0)
+    other = sorted(
+        (key for key in frames if key != 0),
+        key=lambda key: len(frames[key]["edges_indices"]),
+        reverse=True
+    )
+    ordered = {0: frames[0]}
+    ordered.update({i + 1: frames[key] for i, key in enumerate(other)})
+    
+    return ordered
+
+def generate_frames_old(matrices: Dict, maps: Dict):
+    """
+    Gera arestas usando a matriz filtrada e converte para dois formatos:
+    - edges_indices: pares de nós de associação (ex: ((1, 14), (2, 15))).
+    - edges_residues: pares de resíduos (ex: ((A:ALA:45, ...), (B:GLY:12, ...))).
+
+    Args:
+        distance_matrix_filtered (np.ndarray): Matriz KxK com 1 onde a diferença de distância < cutoff e np.nan caso contrário.
+        possible_nodes_map (dict): Dicionário que mapeia índice -> nó de associação.
+
+    Returns:
+        edges_indices (List[Tuple]): Lista de arestas em formato de índices.
+        edges_residues (List[Tuple]): Lista de arestas convertidas para resíduos.
+    """
+    frames = dict()
+    sets = set()
+    checked_sets = set()
+    base_frame = set()
+    edges_base = set()
+
+    dm_matrix = matrices["dm_possible_nodes"]
+    np.fill_diagonal(dm_matrix, 1)
+
+    adj_matrix = matrices["adj_possible_nodes"]
+    np.fill_diagonal(adj_matrix, np.nan)
+    
+    lenght = dm_matrix.shape[0]  
+
+    k = 1
+    for i in range(0, lenght):
+        adj_indices = np.where(adj_matrix[i] == 1)
+        if len(adj_indices) > 0:
+            edges_base.update(map(frozenset, np.column_stack((np.full_like(adj_indices[0], i), adj_indices[0]))))  
+
+            intersection = dm_matrix[i]
+            
+            for target in adj_indices[0]:
+                intersection *= dm_matrix[target]
+            
+            intersection_set = set(np.where(intersection == 1)[0])
+        
+            if len(intersection_set) > 3 and frozenset(intersection_set) not in checked_sets:
+                edges = set()
+                checked_sets.add(frozenset(intersection_set)) 
+                nodes = np.array(list(intersection_set))
+
+                sub_adj = adj_matrix[nodes][:, nodes]
+                
+                degrees = np.sum(np.nan_to_num(sub_adj), axis = 1)
+                valid_nodes = nodes[degrees > 2]
+                valid_nodes_set = frozenset(valid_nodes)
+                valid_mask = np.isin(nodes, valid_nodes)
+                filtered_sub_adj = sub_adj[valid_mask][:, valid_mask]
+
+                valid_edges = valid_nodes[np.column_stack(np.where(filtered_sub_adj == 1))]
+
+                if len(valid_edges) > 3 and valid_nodes_set not in sets:
+                    edges.update(map(frozenset, valid_edges))
+            
+                    sets.add(valid_nodes_set) 
+                    # print(f"Edges: {edges}")
+                    edges_indices, edges_residues = convert_edges_to_residues(edges, maps)
+                    # print(f"Edges Indices: {edges_indices}")
+                    # print(f"Edges Residues: {edges_residues}")
+                    # input()
+                    frames[k] = {
+                            "edges_residues": edges_residues,
+                            "edges_indices": edges_indices
+                    } 
+
+                    k+= 1
+    
+    # log.debug(f"Edges Base: {edges_base}")
+    edges_base_indices, edges_base_residues = convert_edges_to_residues(edges_base, maps)
+    
+    frame0 = {
+            "edges_residues": edges_base_residues,
+            "edges_indices": edges_base_indices
+    } 
+    
+
+    sorted_items = sorted(frames.items(), key=lambda item: len(item[1]["edges_indices"]), reverse=True)
+    frames = {i: frame_data for i, (_, frame_data) in enumerate(sorted_items, start=1)}
+    frames[0] = frame0
+
+    log.info(f"I found {len(frames.keys())} frames")
+    log.info(f"The base frame has {len(base_frame)} nodes")
+
+    return frames
+
+
+def generate_frames_old_bkp(matrices: Dict, maps: Dict, idMatrices: int):
     """
     Gera arestas usando a matriz filtrada e converte para dois formatos:
     - edges_indices: pares de nós de associação (ex: ((1, 14), (2, 15))).
@@ -1253,6 +1990,81 @@ def create_graph(edges_dict: Dict, typeEdge: str = "edges_indices"):
             Graphs.append(G_sub)
     return Graphs
 
+
+def create_distance_matrix_multiple(
+    nodes: np.ndarray,
+    idMatrices: int,
+    matrices: dict,
+    maps: dict,
+    connect_thresh: float,
+    std_thresh: float
+):
+    """
+    nodes: array shape (K, F), cada linha p é o combo p com índices [i_p^1,...,i_p^F]
+           referenciando as F matrizes de distância
+    matrices deve conter antes:
+      • matrices["dm_pruned_list"]      = [dm_pruned_prot1, ..., dm_pruned_protF]
+        (cada dm_pruned_protX: matriz booleana 1/0 de conectividade para proteína X)
+      • matrices["dm_thresholded_list"] = [dm_dist_prot1, ..., dm_dist_protF]
+        (cada dm_dist_protX: matriz float de distâncias na proteína X)
+    connect_thresh: float
+      → distância máxima para considerar “conectado” em cada proteína
+    std_thresh: float
+      → desvio‑padrão máximo permitido para manter adjacência
+    """
+
+    K, F = nodes.shape
+    pruned_list = matrices["dm_pruned_list"]
+    dist_list   = matrices["dm_thresholded_list"]
+
+    # empilha para indexação vetorizada: shape (F, M, M)
+    stacked_pruned = np.stack(pruned_list, axis=0).astype(bool)
+    stacked_dist   = np.stack(dist_list,    axis=0).astype(float)
+
+    # resultados
+    dm_pruned = np.ones((K, K), dtype=bool)
+    dm_std    = np.zeros((K, K), dtype=float)
+
+    # apenas p<q
+    for p, q in combinations(range(K), 2):
+        idxp = nodes[p]  # array de length F
+        idxq = nodes[q]
+
+        # distâncias em cada frame
+        d_conn = stacked_pruned[np.arange(F), idxp, idxq]   # True/False
+        d_dist = stacked_dist  [np.arange(F), idxp, idxq]   # floats
+
+        # pruned só se todos frames conectam E cada distância ≤ connect_thresh
+        dm_pruned[p, q] = dm_pruned[q, p] = bool((d_conn) & (d_dist <= connect_thresh)).all()
+
+        # std das distâncias brutas
+        dm_std[p, q]    = dm_std[q, p]    = float(np.std(d_dist, ddof=0))
+
+    # diagonal
+    np.fill_diagonal(dm_pruned, False)
+    np.fill_diagonal(dm_std,    0.0)
+
+    # adjacência final p/q: conectado em todas E desvio abaixo do limiar
+    adj = dm_pruned & (dm_std <= std_thresh)
+
+    # escreve de volta em matrices/maps
+    matrices[idMatrices] = {}
+    maps   [idMatrices] = {}
+
+    # mantemos float(1/0) para compatibilidade
+    matrices[idMatrices]["dm_possible_nodes"]  = dm_pruned.astype(float)
+    matrices[idMatrices]["dm_thresholded"]     = dm_std
+    matrices[idMatrices]["adj_possible_nodes"] = adj.astype(float)
+
+    # reconstruir o map de possíveis nós
+    maps[idMatrices]["possible_nodes"] = {}
+    for i, row in enumerate(nodes):
+        tup = tuple(int(x) for x in row)
+        maps[idMatrices]["possible_nodes"][i]   = tup
+        maps[idMatrices]["possible_nodes"][tup] = i
+
+    return matrices, maps
+
 def create_possible_nodes_multiple(reference_graph_indices: list, associated_nodes: np.ndarray, range_graph: Tuple, complement_graph_indices: Union[list, None] = None):
     all_possible_nodes = []
     (start, end) = range_graph
@@ -1342,8 +2154,9 @@ def create_distance_matrix_multiple(nodes, idMatrices: int, matrices: dict, maps
     
     return matrices, maps
 
-def create_distance_matrix(nodes, idMatrices: int, matrices: dict, maps: dict, threshold = 3):
-    i_indices, j_indices = nodes[:, 0], nodes[:, 1]
+def create_distance_matrix(nodes, matrices: dict, maps: dict, threshold = 3):
+    i_indices = [node[0] for node in nodes]
+    j_indices = [node[1] for node in nodes]
     
     def submatrix(matrix, indices):
         return matrix[np.ix_(indices, indices)]
@@ -1361,17 +2174,17 @@ def create_distance_matrix(nodes, idMatrices: int, matrices: dict, maps: dict, t
 
         return M
 
-    matrices[idMatrices]= {} 
-    maps[idMatrices] = {}
+    matrices= {} 
+    maps_out = {}
 
-    matrices[idMatrices]["dm_possible_nodes"] = make_matrix(subA, subB, threshold)
-    matrices[idMatrices]["adj_possible_nodes"] = make_matrix(subA_thresh, subB_thresh, threshold)
-    
-    maps[idMatrices]["possible_nodes"] = {}
+    matrices["dm_possible_nodes"] = make_matrix(subA, subB, threshold)
+    matrices["adj_possible_nodes"] = make_matrix(subA_thresh, subB_thresh, threshold)
+        
+    maps_out["possible_nodes"] = {}
     for i, node in enumerate(nodes):
-        maps[idMatrices]["possible_nodes"][i] = node
-        maps[idMatrices]["possible_nodes"][str(node)] = i
-    
+        maps_out["possible_nodes"][i] = node
+        maps_out["possible_nodes"][str(node)] = i
+    maps["possible_nodes"] = maps_out["possible_nodes"] 
     return matrices, maps
 
 def build_contact_map(pdb_file):
