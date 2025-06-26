@@ -23,7 +23,7 @@ from Bio.PDB.PDBIO import PDBIO
 from Bio.PDB import Chain, Residue, Atom
 from Bio.PDB.mmcifio import MMCIFIO
 from Bio.PDB.Superimposer import Superimposer
-
+import copy
 log = logging.getLogger("CRSProtein")
 
 
@@ -273,22 +273,57 @@ class AssociatedGraph:
         chain, _, resnum = label.split(':')
         return chain, int(resnum), ' '
 
-    def _write_frame_multimodel(self, comp_idx: int, frame_idx: int, models: list, output_dir: str):
+    # def _write_frame_multimodel(self, comp_idx: int, frame_idx: int, models: list, output_dir: str):
+    #     """
+    #     Cria um único mmCIF multi-model contendo todos os modelos
+    #     (proteínas) já alinhados deste frame.
+    #     """
+    #     multi = Structure.Structure(f"comp{comp_idx}_frame{frame_idx}")
+    #     for m_idx, model in enumerate(models, start=1):
+    #         model.id = m_idx
+    #         multi.add(model)
+
+    #     os.makedirs(output_dir, exist_ok=True)
+    #     out_path = Path(output_dir) / f"comp{comp_idx}_frame{frame_idx}_all.cif"
+    #     io = MMCIFIO()
+    #     io.set_structure(multi)
+    #     io.save(str(out_path))
+    #     print(f"[comp{comp_idx}_frame{frame_idx}] wrote {len(models)} models to {out_path}")
+
+    def _write_frame_multichain(self, comp_idx: int, frame_idx: int,
+                                models: list, output_dir: str):
         """
-        Cria um único mmCIF multi-model contendo todos os modelos
-        (proteínas) já alinhados deste frame.
+        Write one mmCIF in which *all* proteins are merged into Model 0
+        and distinguished only by their (renamed) chains.
+
+        The original chain IDs are suffixed with the protein index:
+        chain A in protein 0  -> 'A0'
+        chain C in protein 2  -> 'C2'
+        This preserves one-letter labels when you view the file in PyMOL
+        (PyMOL truncates after the first character) but keeps unique
+        `_atom_site.label_asym_id` in mmCIF so nothing collides.
+
+        mmCIF permits multi-character chain IDs, so MMCIFIO will write them
+        without complaints.
         """
-        multi = Structure.Structure(f"comp{comp_idx}_frame{frame_idx}")
-        for m_idx, model in enumerate(models, start=1):
-            model.id = m_idx
-            multi.add(model)
+        combo = Structure.Structure(f"comp{comp_idx}_frame{frame_idx}")
+        combo_model = Model.Model(0)
+        combo.add(combo_model)
+
+        for prot_idx, prot_model in enumerate(models):
+            for ch in prot_model:
+                new_chain = copy.deepcopy(ch)
+                # keep auth_asym_id compatible with old viewers
+                new_chain.id = f"{ch.id}{prot_idx}"
+                combo_model.add(new_chain)
 
         os.makedirs(output_dir, exist_ok=True)
         out_path = Path(output_dir) / f"comp{comp_idx}_frame{frame_idx}_all.cif"
         io = MMCIFIO()
-        io.set_structure(multi)
+        io.set_structure(combo)
         io.save(str(out_path))
-        print(f"[comp{comp_idx}_frame{frame_idx}] wrote {len(models)} models to {out_path}")
+        print(f"[comp{comp_idx}_frame{frame_idx}] wrote {len(models)} proteins as "
+            f"{len(combo_model)} chains to {out_path}")
 
     def align_all_frames(self, output_dir: str):
         """
@@ -335,7 +370,8 @@ class AssociatedGraph:
                     )
 
                 # 4) salvar todos os modelos alinhados num único mmCIF multi-model
-                self._write_frame_multimodel(comp_idx, frame_idx, models, output_dir)
+                # self._write_frame_multimodel(comp_idx, frame_idx, models, output_dir)
+                self._write_frame_multichain(comp_idx, frame_idx, models, output_dir)
 
 
     def add_spheres(self):
