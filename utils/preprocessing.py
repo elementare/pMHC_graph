@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from io_utils.pdb_io import list_pdb_files, get_user_selection
 from config.parse_configs import make_graph_config
-from classes.classes import StructureSERD
+from SERD_Addon.classes import StructureSERD
 from collections import defaultdict
 from os import path
 from Bio import PDB
@@ -186,14 +186,19 @@ def create_graphs(args) -> List[Tuple]:
         file_info["input_path"] = cleaned_path
         
         graph_instance = Graph(config=graph_config, graph_path=file_info["input_path"])
-        print("Before calculating the Depth")    
-        start_time = time.time()
-        depth = calculate_residue_depth(pdb_file_path=file_info["input_path"], serd_config=args.serd_config)
-        logger.debug(f"Depth calculated in {time.time() - start_time} seconds") 
+        
+        if args.check_depth:
+            print("Before calculating the Depth")    
+            start_time = time.time()
+            depth = calculate_residue_depth(pdb_file_path=file_info["input_path"], serd_config=args.serd_config)
+            logger.debug(f"Depth calculated in {time.time() - start_time} seconds") 
 
-        depth["ResNumberChain"] = depth["ResidueNumber"].astype(str) + depth["Chain"]
+            depth["ResNumberChain"] = depth["ResidueNumber"].astype(str) + depth["Chain"]
 
-        graph_instance.depth = depth
+            graph_instance.depth = depth
+        else:
+            args.depth_filter = None
+            depth = None
 
         selection_params = residues_data.get(file_info["name"], {})
         if "base" in selection_params:

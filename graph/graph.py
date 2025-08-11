@@ -109,7 +109,6 @@ class AssociatedGraph:
                 reference_graph: Optional[Union[str, int]] = None,
                 output_path: str = ".",
                 run_name: str = "",
-                association_mode: str = "identity",
                 association_config: Optional[Dict[str, Any]] = None):
         """
         Initialize an AssociatedGraph instance with a reduced configuration.
@@ -132,10 +131,6 @@ class AssociatedGraph:
         """
         default_config = {
             "centroid_threshold": 10.0,
-            "neighbor_similarity_cutoff": 0.95,
-            "rsa_similarity_threshold": 0.95,
-            "depth_similarity_threshold": 0.95,
-            "residues_similarity_cutoff": 0.95,
             "rsa_bins": 5.0,
             "depth_bins": 5.0,
             "distance_bins": 5.0, 
@@ -155,7 +150,6 @@ class AssociatedGraph:
         self.graph_data = self._prepare_graph_data()
         
         result = association_product(graph_data=self.graph_data,
-                                    association_mode=association_mode,
                                     config=self.association_config)
         
         if result is not None:

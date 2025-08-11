@@ -447,7 +447,7 @@ def residue_to_tuple(res):
     res_split = res.split(":")
     return (res_split[0], int(res_split[2]), res_split[1])
 
-def find_triads(graph_data, association_mode, classes, config, checks):
+def find_triads(graph_data, classes, config, checks):
     G = graph_data["graph"]
     depth = graph_data["residue_depth"]
     rsa = graph_data["rsa"]
@@ -499,11 +499,11 @@ def find_triads(graph_data, association_mode, classes, config, checks):
             rsa2 = rsa[center]*100
             rsa3 = rsa[outer_sorted[1]]*100
 
-            depth1 = depth.loc[depth["ResNumberChain"] == u_resChain]["ResidueDepth"].values[0]
-            depth2 = depth.loc[depth["ResNumberChain"] == center_resChain]["ResidueDepth"].values[0]
-            depth3 = depth.loc[depth["ResNumberChain"] == w_resChain]["ResidueDepth"].values[0]
-
             if checks["depth"]:
+                depth1 = depth.loc[depth["ResNumberChain"] == u_resChain]["ResidueDepth"].values[0]
+                depth2 = depth.loc[depth["ResNumberChain"] == center_resChain]["ResidueDepth"].values[0]
+                depth3 = depth.loc[depth["ResNumberChain"] == w_resChain]["ResidueDepth"].values[0]
+
                 if depth_classes is not None:
                     depth1_class = find_class(depth_classes, depth1)
                     depth2_class = find_class(depth_classes, depth2)
@@ -538,13 +538,13 @@ def find_triads(graph_data, association_mode, classes, config, checks):
                 
             full_describer = (depth1_class, depth2_class, depth3_class, rsa1_class, rsa2_class, rsa3_class, d1_class, d2_class, d3_class) 
                 
-            lista = [ ("A:ARG:163", "C:PRO:4", "C:ILE:5"),  ("A:GLN:155", "C:ILE:5", "C:PRO:4") ]
-            # if (outer_sorted[0], center, outer_sorted[1]) in lista:
-            if "C:ILE:5" in (outer_sorted[0], center, outer_sorted[1]):
-                triad = (u_res_class, center_res_class, w_res_class, d1_class, d2_class, d3_class) 
-                # print(f"{outer_sorted[0], center, outer_sorted[1]} | ({d1}: {d1_class}, {d2}: {d2_class}, {d3}: {d3_class})")
-                print(f"{outer_sorted[0], center, outer_sorted[1], d1_class, d2_class, d3_class}")
-                # print(triad)
+            # lista = [ ("A:ARG:163", "C:PRO:4", "C:ILE:5"),  ("A:GLN:155", "C:ILE:5", "C:PRO:4") ]
+            # # if (outer_sorted[0], center, outer_sorted[1]) in lista:
+            # if "C:ILE:5" in (outer_sorted[0], center, outer_sorted[1]):
+            #     triad = (u_res_class, center_res_class, w_res_class, d1_class, d2_class, d3_class) 
+            #     # print(f"{outer_sorted[0], center, outer_sorted[1]} | ({d1}: {d1_class}, {d2}: {d2_class}, {d3}: {d3_class})")
+            #     print(f"{outer_sorted[0], center, outer_sorted[1], d1_class, d2_class, d3_class}")
+            #     # print(triad)
 
             if None not in full_describer:
                 triad = (u_res_class, center_res_class, w_res_class, *full_describer) 
@@ -553,6 +553,7 @@ def find_triads(graph_data, association_mode, classes, config, checks):
                         "count": 1,
                         "triads_full": [(outer_sorted[0], center, outer_sorted[1], *full_describer)]
                     }
+                    # print(triad)
                 else: 
                     triads[triad]["count"] += 1
                     triads[triad]["triads_full"].append((outer_sorted[0], center, outer_sorted[1], *full_describer))
@@ -569,7 +570,7 @@ def find_triads(graph_data, association_mode, classes, config, checks):
     
     logging.info(f"N Nodes: {n_nodes} | N Edges: {n_edges} | N Triad: {n_triad} | Unique Triad: {len(triads.keys())}")
     logging.debug(f"Counters: {counters}")
-    input()
+
     return triads
 
 
@@ -1023,7 +1024,6 @@ def create_std_matrix(nodes, matrices: dict, maps: dict, threshold: float = 3.0)
     return new_matrices, maps
 
 def association_product(graph_data: list,
-                        association_mode: str,
                         config: dict,
                         debug: bool = True) -> Union[Dict[str, List], None]:
     logger = logging.getLogger("association.association_product")
@@ -1038,17 +1038,19 @@ def association_product(graph_data: list,
     else:
         classes = {}
 
+
     depths = []
-    for gd in graph_data:
-        df = gd["residue_depth"]
-        depth_dict = dict(zip(df["ResNumberChain"], df["ResidueDepth"]))
-        depths.append(
-            np.array([ depth_dict[node] for node in gd["depth_nodes"] ])
-        )
+    if checks["depth"]:
+        for gd in graph_data:
+            df = gd["residue_depth"]
+            depth_dict = dict(zip(df["ResNumberChain"], df["ResidueDepth"]))
+            depths.append(
+                np.array([ depth_dict[node] for node in gd["depth_nodes"] ])
+            )
 
     graph_collection = {
         "graphs": [gd["graph"] for gd in graph_data],
-        "triads": [find_triads(gd, association_mode, classes, config, checks) for gd in graph_data],
+        "triads": [find_triads(gd, classes, config, checks) for gd in graph_data],
         "contact_maps": [gd["contact_map"] for gd in graph_data],
         "residue_maps_all": [gd["residue_map_all"] for gd in graph_data],
         "rsa_maps": [gd["rsa"] for gd in graph_data],
@@ -1188,7 +1190,7 @@ def association_product(graph_data: list,
             comp_id += 1
 
     return {
-                "AssociatedGraph": Graphs
+            "AssociatedGraph": Graphs
         }
 
 

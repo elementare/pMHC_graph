@@ -11,9 +11,10 @@ python3 main.py \
 --depth_similarity_threshold 0.7 \
 --distance_diff_threshold 10.0 \
 --centroid_threshold 8.5 \
---check_rsa False \
+--check_rsa True \
 --check_depth False \
 --distance_bins 3 \
+--rsa_bins 3 \
 --debug True
 # --classes_path jsons/residues_classes.json \
 # --interface_list resources/interface_MHC_unique.csv \
