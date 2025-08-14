@@ -46,7 +46,6 @@ def main():
         graphs=graphs,
         output_path=args.output_path,
         run_name=args.run_name,
-        association_mode=args.association_mode,
         association_config=association_config
     )
 

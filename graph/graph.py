@@ -1,10 +1,12 @@
 from __future__ import annotations
-from graphein.protein.config import ProteinGraphConfig
+# from graphein.protein.config import ProteinGraphConfig
+from core.config import ProteinGraphConfig, DSSPConfig
+from core.pipeline import build_graph_with_config
 from graphein.protein.graphs import construct_graph
 from graphein.protein.edges.distance import add_distance_threshold
 from graphein.protein.features.nodes.dssp import rsa, secondary_structure
-from graphein.protein.config import DSSPConfig
-from graphein.protein.subgraphs import extract_subgraph
+# from graphein.protein.config import DSSPConfig
+from core.subgraphs import extract_subgraph
 from functools import partial
 from time import time
 import networkx as nx
@@ -58,13 +60,22 @@ class Graph:
         :param config: Custom configuration for the protein graph.
         """
         self.config = config or ProteinGraphConfig(
-            edge_construction_functions=[partial(add_distance_threshold, long_interaction_threshold=0, threshold=10.0)],
+            granularity="centroids",
+            edge_construction_functions=[
+                partial(
+                    add_distance_threshold,
+                    threshold=8.5,
+                    long_interaction_threshold=0
+                )
+            ],
             graph_metadata_functions=[rsa, secondary_structure],
             dssp_config=DSSPConfig(),
-            granularity="centroids"
+            exclude_waters=False,
+            compute_rsa=True
         )
         self.graph_path = graph_path
-        self.graph = construct_graph(config=self.config, path=graph_path)
+        self.graph = build_graph_with_config(pdb_path=graph_path, config=self.config)
+        # self.graph = construct_graph(config=self.config, path=graph_path)
         self.subgraphs: Dict[str, nx.Graph] = {}
         self.depth: pd.DataFrame
 
@@ -192,8 +203,16 @@ class AssociatedGraph:
             contact_map, residue_map, residue_map_all = build_contact_map(pdb_file)
             
             sorted_nodes = sorted(list(g.nodes()))
+            print(sorted_nodes)
+            input()
             depth_nodes = [str(node.split(":")[2])+node.split(":")[0] for node in sorted_nodes]
             
+            rsa_by_node = nx.get_node_attributes(g, "rsa")
+            rsa_df = pd.Series(rsa_by_node, name="rsa").rename_axis("node_id").to_frame()
+            print(g.nodes(data=True))
+            print("-----")
+            print(rsa_df)
+            input()
             data: GraphData = {
                 "id": i,
                 "graph": g,
@@ -202,7 +221,7 @@ class AssociatedGraph:
                 "contact_map": contact_map,
                 "residue_map": residue_map,
                 "residue_map_all": residue_map_all,
-                "rsa": g.graph["dssp_df"]["rsa"],
+                "rsa": rsa_vec, #g.graph["dssp_df"]["rsa"],
                 "residue_depth": g.graph["depth"],
                 "pdb_file": pdb_file
             }

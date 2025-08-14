@@ -14,6 +14,7 @@ import networkx as nx
 from typing import Tuple, Dict, List
 import matplotlib.pyplot as plt
 from memory_profiler import profile
+from core.config import make_default_config
 
 logger = logging.getLogger("Preprocessing")
 
@@ -176,13 +177,16 @@ def create_graphs(args) -> List[Tuple]:
             selected_files.append(file_info)
 
     Path(args.output_path).mkdir(parents=True, exist_ok=True)
-    graph_config = make_graph_config(centroid_threshold=args.centroid_threshold)
+    
+
+    graph_config = make_default_config(centroid_threshold=args.centroid_threshold, exclude_waters=False)
+    # graph_config = make_graph_config(centroid_threshold=args.centroid_threshold)
     
     graphs = []
     for file_info in selected_files:
         cleaned_path = path.join(pdb_directory, file_info["name"].replace('.pdb', '_nOH.pdb'))
         
-        remove_water_from_pdb(file_info["input_path"], cleaned_path)
+        # remove_water_from_pdb(file_info["input_path"], cleaned_path)
         file_info["input_path"] = cleaned_path
         
         graph_instance = Graph(config=graph_config, graph_path=file_info["input_path"])
