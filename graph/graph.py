@@ -1,11 +1,7 @@
 from __future__ import annotations
-# from graphein.protein.config import ProteinGraphConfig
-from core.config import ProteinGraphConfig, DSSPConfig
+
+from core.config import GraphConfig, make_default_config
 from core.pipeline import build_graph_with_config
-from graphein.protein.graphs import construct_graph
-from graphein.protein.edges.distance import add_distance_threshold
-from graphein.protein.features.nodes.dssp import rsa, secondary_structure
-# from graphein.protein.config import DSSPConfig
 from core.subgraphs import extract_subgraph
 from functools import partial
 from time import time
@@ -27,7 +23,6 @@ from Bio.PDB import Chain, Residue, Atom
 from Bio.PDB.mmcifio import MMCIFIO
 from Bio.PDB.Superimposer import Superimposer
 from pyvis.network import Network
-import webbrowser
 import copy
 
 
@@ -50,34 +45,34 @@ class GraphData(TypedDict):
     pdb_file: str
 
 class Graph:
-    """Represents a protein structure graph."""
+    """Represents a protein structure graph (no external framework assumptions)."""
 
-    def __init__(self, graph_path: str, config: Optional[ProteinGraphConfig] = None):
+    def __init__(self, graph_path: str, config: Optional[GraphConfig] = None):
         """
-        Initialize a Graph instance.
-
-        :param graph_path: Path to the PDB file.
-        :param config: Custom configuration for the protein graph.
+        Parameters
+        ----------
+        graph_path : str
+            Path to a PDB or mmCIF file.
+        config : GraphConfig, optional
+            Unified graph configuration. If not provided, a sensible default is used.
         """
-        self.config = config or ProteinGraphConfig(
-            granularity="centroids",
-            edge_construction_functions=[
-                partial(
-                    add_distance_threshold,
-                    threshold=8.5,
-                    long_interaction_threshold=0
-                )
-            ],
-            graph_metadata_functions=[rsa, secondary_structure],
-            dssp_config=DSSPConfig(),
-            exclude_waters=False,
-            compute_rsa=True
-        )
         self.graph_path = graph_path
-        self.graph = build_graph_with_config(pdb_path=graph_path, config=self.config)
-        # self.graph = construct_graph(config=self.config, path=graph_path)
+        self.config = config or make_default_config(
+            centroid_threshold=8.5,
+            granularity="all_atoms",  # "all_atoms" | "backbone" | "side_chain" | "ca_only"
+            exclude_waters=False,
+        )
+
+        # Build the structure graph and keep only pickle-safe artifacts in G.graph
+        self.graph: nx.Graph = build_graph_with_config(pdb_path=graph_path, config=self.config)
+
+        # Convenience handles (optional; also pickle-safe)
         self.subgraphs: Dict[str, nx.Graph] = {}
-        self.depth: pd.DataFrame
+        self.pdb_df: Optional[pd.DataFrame] = self.graph.graph.get("pdb_df")
+        self.raw_pdb_df: Optional[pd.DataFrame] = self.graph.graph.get("raw_pdb_df")
+        self.rgroup_df: Optional[pd.DataFrame] = self.graph.graph.get("rgroup_df")
+        self.dssp_df: Optional[pd.DataFrame] = self.graph.graph.get("dssp_df")
+        self.depth: Optional[pd.DataFrame]
 
     def get_subgraph(self, name:str):
         if name not in self.subgraphs.keys():
@@ -167,11 +162,14 @@ class AssociatedGraph:
             "distance_bins": 5.0, 
             "angle_diff": 20.0,
             "checks": {"neighbors": True, "rsa": True, "depth": True},
-            "factors_path": None
+            "factors_path": None,
+            "exclude_waters": True
         }
         self.association_config = default_config.copy()
         if association_config:
             self.association_config.update(association_config)
+
+        self.track_residues = self.association_config.get("track_residues", None)
         
         self.graphs = graphs
         self.reference_graph = reference_graph
@@ -200,19 +198,11 @@ class AssociatedGraph:
         """
         graph_data = []
         for i, (g, pdb_file) in enumerate(self.graphs):
-            contact_map, residue_map, residue_map_all = build_contact_map(pdb_file)
-            
+            contact_map, residue_map, residue_map_all = build_contact_map(pdb_file, exclude_waters=self.association_config["exclude_waters"])
+          
             sorted_nodes = sorted(list(g.nodes()))
-            print(sorted_nodes)
-            input()
             depth_nodes = [str(node.split(":")[2])+node.split(":")[0] for node in sorted_nodes]
-            
-            rsa_by_node = nx.get_node_attributes(g, "rsa")
-            rsa_df = pd.Series(rsa_by_node, name="rsa").rename_axis("node_id").to_frame()
-            print(g.nodes(data=True))
-            print("-----")
-            print(rsa_df)
-            input()
+
             data: GraphData = {
                 "id": i,
                 "graph": g,
@@ -221,7 +211,7 @@ class AssociatedGraph:
                 "contact_map": contact_map,
                 "residue_map": residue_map,
                 "residue_map_all": residue_map_all,
-                "rsa": rsa_vec, #g.graph["dssp_df"]["rsa"],
+                "rsa": g.graph["dssp_df"]["rsa"],
                 "residue_depth": g.graph["depth"],
                 "pdb_file": pdb_file
             }
@@ -499,11 +489,6 @@ class AssociatedGraph:
 
                     log.info(f"{j}: saved graph {i} to {full}")
 
-                    # if show:
-                    #     try:
-                    #         webbrowser.open(full.as_uri())
-                    #     except Exception as e:
-                    #         log.warning(f"Could not open browser for {full}: {e}")
                 elif show:
                     tmpfile = out_dir / f"__preview_{j}_{i}.html"
                     html = net.generate_html(
@@ -513,10 +498,6 @@ class AssociatedGraph:
 
                     with open(str(tmpfile), "w+") as out:
                         out.write(html)
-                    # try:
-                    #     webbrowser.open(tmpfile.as_uri())
-                    # except Exception as e:
-                    #     log.warning(f"Could not open browser for preview {tmpfile}: {e}")
 
     def draw_graph(self, show=False, save=True):
         if not show and not save:

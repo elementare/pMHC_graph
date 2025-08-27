@@ -2,7 +2,18 @@
     "inputs": [
         {
             "path": ["Analysis/selected_strs_renumber/without_TCR"],
-            "constrains": ["MHC1"]
+            "constrains": 
+                [{
+                    "name": "MHC1"
+                }]
+        },
+        {
+            "path": ["pdb_input"],
+            "constrains": 
+                [{
+                    "name": "MHC1",
+                    "file_name_contains": "pmhc"
+                }]
         }
     ],
     "constrains": {
@@ -33,5 +44,4 @@
             }
         }
     }
-
 }

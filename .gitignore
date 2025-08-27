@@ -3,3 +3,10 @@
 *.pdb
 *.png
 __pycache__/
+Analysis/*
+Analysis/
+Analysis/**/*
+CrossSteps/
+CrossSteps/*
+CrossSteps/**/*
+data/

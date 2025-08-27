@@ -1,1 +1,1 @@
-from .pdb_graph_builder import PDBGraphBuilder, GraphBuildConfig, BuiltGraph
+from .pdb_graph_builder import PDBGraphBuilder, GraphConfig, BuiltGraph
