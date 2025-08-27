@@ -2,6 +2,7 @@
 *.pyc
 *.pdb
 *.png
+*.zip
 __pycache__/
 Analysis/*
 Analysis/
