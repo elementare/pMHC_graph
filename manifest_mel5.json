@@ -1,21 +1,21 @@
 {
   "settings": {
-    "run_name": "titinxMageA3",
-    "output_path": "data/titinxMageA3",
+    "run_name": "hla_3",
+    "output_path": "data/hla3",
     "debug": true,
-    "track_steps": true,
-    "centroid_threshold": 10,
-    "centroid_granularity": "all_atoms",
+    "track_steps": false,
+    "centroid_threshold": 10.0,
+    "centroid_granularity": "ca_only",
     "exclude_waters": false,
     "check_rsa": true,
     "check_depth": false,
     "rsa_filter": 0.1,
     "depth_filter": 10.0,
-    "distance_diff_threshold": 10.0,
-
-    "distance_bins": 3,
+    "distance_diff_threshold": 3.0,
+    
+    "distance_bins": 5,
     "rsa_bins": 3,
-    "depth_bins": 3,
+    "depth_bins": 5,
 
     "serd_config": null,
 
@@ -33,11 +33,11 @@
 
   "inputs": [
     {
-      "path": "Analysis/selected_strs_renumber/without_TCR",
-      "enable_tui": true,
-      "extensions": [".pdb", ".pdb.gz", ".cif"],
+      "path": "/home/elementare/GithubProjects/pMHC_graph/Analysis/pdb_all",
+      "enable_tui": false,
+      "extensions": [".pdb", ".cif"],
       "constrains": [
-        { "name": "MHC1", "file_name_contains": "pmhc" }
+        { "name": "MHC1" }
       ]
     }
   ],

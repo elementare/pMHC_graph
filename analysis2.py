@@ -611,15 +611,16 @@ manifest = {
     "run_name": None,
     "output_path": None,
     "debug": True,
-    "track_steps": True,
-    "centroid_threshold": 8.5,
+    "track_steps": False,
+    "centroid_threshold": 10.0,
     "centroid_granularity": "ca_only",
     "exclude_waters": False,
     "check_rsa": True,
     "check_depth": False,
     "rsa_filter": 0.1,
     "depth_filter": 10.0,
-    "distance_diff_threshold": 10.0,
+    "distance_diff_threshold": 3.0,
+    "rsa_table": "Wilke",
 
     "distance_bins": 3,
     "rsa_bins": 3,
@@ -674,8 +675,8 @@ log.setLevel(logging.DEBUG if S.get("debug", False) else logging.INFO)
 
 
 res_both = run_cross_analysis(
-    mode="both",
+    mode="all",
     cross_df=crossDf,
     manifest=manifest,
-    root="Analysis/CrossGraphs_8_5_CA_NewMethod"
+    root="Analysis/CrossGraphs_10_Multiclass"
 )

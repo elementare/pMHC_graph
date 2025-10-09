@@ -7,6 +7,9 @@ from SERD_Addon.classes import StructureSERD
 from collections import defaultdict
 from os import path
 from Bio import PDB
+from Bio.PDB import PDBParser, MMCIFParser
+from Bio.PDB.PDBIO import PDBIO
+from Bio.PDB.mmcifio import MMCIFIO
 import time
 import numpy as np
 import networkx as nx
@@ -14,29 +17,67 @@ from typing import Tuple, List, Dict, Optional, Any, Union
 from memory_profiler import profile
 from core.config import make_default_config
 from core.tracking import save
+import gemmi
+import os
 
 logger = logging.getLogger("Preprocessing")
 
 
-def remove_water_from_pdb(source_file, dest_file):
-    """Remove water molecules (HOH) from a PDB file and save the cleaned version."""
+# def remove_water_from_pdb(source_file, dest_file):
+#     """Remove water molecules (HOH) from a PDB file and save the cleaned version."""
     
-    if path.exists(dest_file):
-        logger.debug(f"The file {dest_file} already exists.")
-    else:
-        parser = PDB.PDBParser(QUIET=True)
-        structure = parser.get_structure("protein", source_file)
+#     if path.exists(dest_file):
+#         logger.debug(f"The file {dest_file} already exists.")
+#     else:
+#         suffix = source_file.lower()
+#         if suffix.endswith((".cif", ".mmcif", ".mcif")):
+#             parser = MMCIFParser(QUIET=True)
+#         else:
+#             parser = PDBParser(QUIET=True)
+#         structure = parser.get_structure("protein", source_file)
+                
+#         class NoWaterSelect(PDB.Select):
+#             def accept_residue(self, residue):
+#                 if hasattr(residue, "get_resname"):
+#                     return residue.get_resname() != "HOH"
+#                 else:
+#                     return True
         
-        io = PDB.PDBIO()
-        io.set_structure(structure)
-        
-        class NoWaterSelect(PDB.Select):
-            def accept_residue(self, residue):
-                return residue.get_resname() != "HOH"
-        
-        io.save(dest_file, select=NoWaterSelect())
-        logger.debug(f"Saved cleaned PDB file: {dest_file}")
+#         dst_lower = dest_file.lower()
+#         if dst_lower.endswith((".cif", ".mmcif", ".mcif")):
+#             io = MMCIFIO()
+#             io.set_structure(structure)
+#             io.save(dest_file, select=NoWaterSelect())
+#         else:
+#             io = PDBIO()
+#             io.set_structure(structure)
+#             io.save(dest_file, select=NoWaterSelect())
+#         logger.debug(f"Saved cleaned PDB file: {dest_file}")
 
+def remove_water_from_pdb(source_file, dest_file):
+    """Remove water molecules from a PDB or mmCIF file and save the cleaned version safely."""
+    
+    if os.path.exists(dest_file):
+        logger.debug(f"The file {dest_file} already exists.")
+        return
+
+    suffix = source_file.lower()
+    is_cif = suffix.endswith((".cif", ".mmcif", ".mcif"))
+
+    st = gemmi.read_structure(source_file)
+
+    for model in st:
+        model.remove_waters()
+
+    if is_cif:
+        doc = st.make_mmcif_document()
+        with open(dest_file, "w") as f:
+            f.write(doc.as_string())
+    else:
+        st.write_pdb(dest_file)
+
+    logger.debug(f"Saved cleaned structure without waters: {dest_file}")
+    
 def get_exposed_residues(graph: Graph, rsa_filter=0.1, depth_filter: Union[float, None]=10.0, selection_params=None) -> nx.Graph:
     selection_params = selection_params or {}
 
@@ -294,10 +335,6 @@ def resolve_selection_params_for_file(file_path: Path, manifest: Dict[str, Any])
             merged = _merge_constraints(merged, spec)
     return merged
 
-
-
-# ---------------------- create_graphs (mantendo sua seleção) ----------------------
-
 def create_graphs(manifest: Dict) -> List[Tuple]:
 
     S = manifest["settings"]
@@ -313,9 +350,11 @@ def create_graphs(manifest: Dict) -> List[Tuple]:
         centroid_threshold=S["centroid_threshold"],
         granularity=S["centroid_granularity"],
         exclude_waters=S["exclude_waters"],
+        dssp_acc_array=S["rsa_table"]
     )
 
     graphs: List[Tuple] = []
+    start = time.perf_counter()
     for file_info in selected_files:
         orig_path = Path(file_info["input_path"]).resolve()
         if S["exclude_waters"]:
@@ -324,6 +363,8 @@ def create_graphs(manifest: Dict) -> List[Tuple]:
                 cleaned_name = cleaned_name[:-7] + "_nOH.pdb"
             elif cleaned_name.endswith(".pdb"):
                 cleaned_name = cleaned_name[:-4] + "_nOH.pdb"
+            elif cleaned_name.endswith(".cif"):
+                cleaned_name = cleaned_name[:-4] + "_nOH.cif"
             else:
                 cleaned_name = cleaned_name + "_nOH.pdb"
             cleaned_path = (orig_path.parent / cleaned_name).resolve()
@@ -359,5 +400,7 @@ def create_graphs(manifest: Dict) -> List[Tuple]:
 
         save("create_graphs", f"{graph_path.stem}_subgraph", subgraph)
         graphs.append((subgraph, str(orig_path)))
+    end = time.perf_counter()
 
+    logger.debug(f"Took {end - start:.6f} seconds to create graphs")
     return graphs

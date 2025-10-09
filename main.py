@@ -26,6 +26,7 @@ def load_manifest(manifest_path: str) -> Dict[str, Any]:
     S.setdefault("output_path", "./outputs")
     S.setdefault("debug", False)
     S.setdefault("track_steps", False)
+    S.setdefault("rsa_table", "Wilke")
 
     S.setdefault("centroid_threshold", 8.5)
     S.setdefault("centroid_granularity", "all_atoms")
@@ -51,16 +52,13 @@ def load_manifest(manifest_path: str) -> Dict[str, Any]:
     return data
 
 def main():
-    # 1) CLI mínima: só --manifest
-    args = parse_args()  # parse_args() agora só tem --manifest
+    args = parse_args() 
 
-    # 2) Carrega manifest unificado
     manifest = load_manifest(args.manifest)
-    S = manifest["settings"]  # atalhos
+    S = manifest["settings"] 
     run_name = S["run_name"]
     output_path = S["output_path"]
 
-    # 3) Tracker e logging baseados em settings
     init_tracker(
         root="CrossSteps",
         outdir=run_name,
@@ -77,16 +75,13 @@ def main():
     log = logging.getLogger("CRSProtein")
     log.setLevel(logging.DEBUG if S.get("debug", False) else logging.INFO)
 
-    # 4) Checks
     checks = {
         "depth": S.get("check_depth"),
         "rsa":   S.get("check_rsa"),
     }
 
-    # 5) Constrói grafos a partir do manifest
     graphs = create_graphs(manifest)
 
-    # 6) Config de associação vinda de settings
     association_config = {
         "centroid_threshold":          S.get("centroid_threshold"),
         "distance_diff_threshold":     S.get("distance_diff_threshold"),
@@ -98,9 +93,9 @@ def main():
         "checks":                      checks,
         "exclude_waters":              S.get("exclude_waters"),
         "classes": S.get("classes", {}),
+        "rsa_table": S.get("rsa_table", "Wilke")
     }
 
-    # 7) Roda a associação
     G = AssociatedGraph(
         graphs=graphs,
         output_path=output_path,
@@ -115,8 +110,8 @@ def main():
     G.draw_graph_interactive(show=False, save=True)
     G.draw_graph(show=False, save=True)
 
-    # G.create_pdb_per_protein()
-    # G.align_all_frames()
+    G.create_pdb_per_protein()
+    G.align_all_frames()
 
 
     # log.debug("Growing Subgraph")

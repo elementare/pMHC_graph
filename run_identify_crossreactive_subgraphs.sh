@@ -1,5 +1,5 @@
 python3 main.py \
---manifest manifest_pdb_input.json
+--manifest manifest_analysis.json
 # --folder_path /home/elementare/GithubProjects/pMHC_graph/pdb_input \
 # --run_name old_way \
 # --association_mode identity \

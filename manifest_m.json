@@ -1,17 +1,18 @@
 {
   "settings": {
-    "run_name": "pdbInput",
-    "output_path": "data/pdbInput",
+    "run_name": "HKU1",
+    "output_path": "data/HKU1",
     "debug": true,
-    "track_steps": false,
-    "centroid_threshold": 10.0,
+    "track_steps": true,
+    "centroid_threshold": 8.5,
     "centroid_granularity": "ca_only",
-    "exclude_waters": true,
+    "exclude_waters": false,
     "check_rsa": true,
     "check_depth": false,
     "rsa_filter": 0.1,
     "depth_filter": 10.0,
     "distance_diff_threshold": 3.0,
+    
 
     "distance_bins": 3,
     "rsa_bins": 3,
@@ -33,11 +34,11 @@
 
   "inputs": [
     {
-      "path": ["pdb_input/pmhc_mage3_5brz_renumber.pdb","pdb_input/pmhc_titin_5bs0_renumber.pdb"],
+      "path": "/home/elementare/GithubProjects/pMHC_graph/Analysis/processed_pdb_mhcII/hku1_renamed.pdb,/home/elementare/GithubProjects/pMHC_graph/Analysis/processed_pdb_mhcII/srscv2_n326_renamed.pdb",
       "enable_tui": false,
-      "extensions": [".pdb", ".pdb.gz", ".cif"],
+      "extensions": [".pdb", ".cif"],
       "constrains": [
-        { "name": "MHC1", "file_name_contains": "pmhc" }
+        { "name": "MHC2" }
       ]
     }
   ],

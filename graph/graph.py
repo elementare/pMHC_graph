@@ -8,7 +8,7 @@ from functools import partial
 from time import time
 import networkx as nx
 import matplotlib.pyplot as plt
-from utils.tools import association_product,build_contact_map, add_sphere_residues, create_subgraph_with_neighbors
+from utils.tools import association_product,build_contact_map, add_sphere_residues
 import plotly.graph_objects as go
 from pathlib import Path
 from os import path
@@ -64,10 +64,8 @@ class Graph:
             exclude_waters=False,
         )
 
-        # Build the structure graph and keep only pickle-safe artifacts in G.graph
         self.graph: nx.Graph = build_graph_with_config(pdb_path=graph_path, config=self.config)
 
-        # Convenience handles (optional; also pickle-safe)
         self.subgraphs: Dict[str, nx.Graph] = {}
         self.pdb_df: Optional[pd.DataFrame] = self.graph.graph.get("pdb_df")
         self.raw_pdb_df: Optional[pd.DataFrame] = self.graph.graph.get("raw_pdb_df")
@@ -189,6 +187,8 @@ class AssociatedGraph:
             sorted_nodes = sorted(list(g.nodes()))
             depth_nodes = [str(node.split(":")[2])+node.split(":")[0] for node in sorted_nodes]
 
+            no170 = [node for node in sorted_nodes if node == "A:ARG:170"]
+            print(i, no170)
             data: GraphData = {
                 "id": i,
                 "graph": g,
@@ -233,18 +233,19 @@ class AssociatedGraph:
                                     resnum = int(resnum)
                                     icode = " "
                             else:
-                                match = re.match(r"(\d+)([A-Za-z]?)$", resnum)
+                                match = re.match(r"\s*(-?\d+)\s*([A-Za-z]?)\s*", resnum)
                                 if not match:
                                     raise ValueError(f"Invalid residue resnum: {resnum}")
-                                resnum, icode = match.groups()
+                                resnum = int(match.group(1))
+                                icode = match.group(2) or ' ' 
 
                             try:
                                 orig_res = orig_struct[0][chain_name][(" ", int(resnum), icode)]
                             except KeyError:
                                 print(f"Resíduo {node} não encontrado, pulando.")
                                 continue
-
-                            new_res = Residue.Residue(orig_res.id, orig_res.resname, orig_res.segid)
+                            res_id = (" ", int(resnum), f"{chain_name}:{icode}")
+                            new_res = Residue.Residue(res_id, chain_name+orig_res.resname, orig_res.segid)
 
                             for atom in orig_res:
                                 new_atom = Atom.Atom(
@@ -334,7 +335,8 @@ class AssociatedGraph:
         for comp_idx, (frame_graphs, _) in enumerate(self.associated_graphs):
             for frame_idx, assoc_graph in enumerate(frame_graphs):
                 nodes = list(assoc_graph.nodes())
-
+                if not nodes:
+                    return False
                 models = []
                 for prot_idx, (_, pdb_path) in enumerate(self.graphs):
                     struct = parser.get_structure(f"p{prot_idx}", pdb_path)
@@ -346,11 +348,18 @@ class AssociatedGraph:
                     if resnum.isdigit():
                         resnum = int(resnum)
                     else:
-                        match = re.match(r"(\d+)([A-Za-z]?)$", resnum)
+                        match = re.match(r"\s*(-?\d+)\s*([A-Za-z]?)\s*", resnum)
                         if not match:
                             raise ValueError(f"Invalid residue resnum: {resnum}")
-                        resnum, icode = match.groups()
-                    ref_res = models[0][chain][(' ', int(resnum), icode)]
+                        resnum = int(match.group(1))
+                        icode = match.group(2) or ' ' 
+                    try:
+                        ref_res = models[0][chain][(' ', int(resnum), icode)]
+                    except Exception as e:
+                        print(e)
+                        print(dir(models[0][chain]))
+                        print(models[0][chain].tolist())
+                        input()
                     ref_cas.append(ref_res['CA'])
 
                 for prot_idx in range(1, len(models)):
@@ -360,10 +369,11 @@ class AssociatedGraph:
                         if resnum.isdigit():
                                 resnum = int(resnum)
                         else:
-                            match = re.match(r"(\d+)([A-Za-z]?)$", resnum)
+                            match = re.match(r"\s*(-?\d+)\s*([A-Za-z]?)\s*", resnum)
                             if not match:
                                 raise ValueError(f"Invalid residue resnum: {resnum}")
-                            resnum, icode = match.groups()
+                            resnum = int(match.group(1))
+                            icode = match.group(2) or ' ' 
                         mob_res = models[prot_idx][chain][(' ', resnum, icode)]
                         mob_cas.append(mob_res['CA'])
 
@@ -412,7 +422,6 @@ class AssociatedGraph:
                 cmap = plt.cm.get_cmap('tab10', max(1, len(chain_ids)))
                 palette = {cid: _rgba_to_hex(cmap(idx)) for idx, cid in enumerate(chain_ids)}
 
-                # compact labels
                 node_labels = {}
                 for n in graph.nodes():
                     if isinstance(n, tuple) and n and isinstance(n[0], tuple):
@@ -423,7 +432,6 @@ class AssociatedGraph:
                     else:
                         node_labels[n] = str(n)
 
-                # attach display attrs
                 for n in graph.nodes():
                     cid = graph.nodes[n].get('chain_id', '?')
                     graph.nodes[n]['label'] = node_labels[n]
@@ -432,7 +440,6 @@ class AssociatedGraph:
                     graph.nodes[n]['size'] = 12
                     graph.nodes[n]['group'] = cid
 
-                # relabel nodes to safe string ids
                 safe_map = {n: f"v{idx}" for idx, n in enumerate(graph.nodes())}
                 H = nx.relabel_nodes(graph, safe_map, copy=True)
 
@@ -564,37 +571,120 @@ class AssociatedGraph:
 
     def grow_subgraph_bfs(self):
         count_pep_nodes = 0
-        G_sub = self.associated_graph
-        for nodes in G_sub.nodes:
-            if nodes[0].startswith('C') and nodes[1].startswith('C'): #i.e. peptide nodes
-                count_pep_nodes += 1
+        G_subs = self.associated_graphs
+        for G_sub in G_subs:
+            for nodes in G_sub.nodes:
+                if nodes[0].startswith('C') and nodes[1].startswith('C'): #i.e. peptide nodes
+                    count_pep_nodes += 1
 
-                bfs_subgraph = create_subgraph_with_neighbors(self.graphs, G_sub, nodes, 20)
-                for nodes2 in bfs_subgraph.nodes:
-                    if nodes2[0].startswith('A') and nodes2[1].startswith('A'):
-                        bfs_subgraph.nodes[nodes2]['chain_id'] = 'red'
-                    elif nodes2[0].startswith('C') and nodes2[1].startswith('C'):
-                        bfs_subgraph.nodes[nodes2]['chain_id'] = 'blue'
+                    bfs_subgraph = self.create_subgraph_with_neighbors(G_sub, nodes, 20)
+                    for nodes2 in bfs_subgraph.nodes:
+                        if nodes2[0].startswith('A') and nodes2[1].startswith('A'):
+                            bfs_subgraph.nodes[nodes2]['chain_id'] = 'red'
+                        elif nodes2[0].startswith('C') and nodes2[1].startswith('C'):
+                            bfs_subgraph.nodes[nodes2]['chain_id'] = 'blue'
+                        else:
+                            bfs_subgraph.nodes[nodes2]['chain_id'] = None
+
+                    number_peptide_nodes = len([i for i in bfs_subgraph.nodes if i[0].startswith('C')])
+                    if bfs_subgraph.number_of_nodes() >= 14 and nx.diameter(bfs_subgraph) >= 3 and number_peptide_nodes >=3:
+                        node_colors = [bfs_subgraph.nodes[node]['chain_id'] for node in bfs_subgraph.nodes]
+                        nx.draw(bfs_subgraph, with_labels=True, node_color=node_colors)
+                        plt.savefig(path.join(self.output_path,f'plot_bfs_{nodes[0]}_{self.run_name}.png'))
+                        plt.clf()
+
+                        get_node_names = list(bfs_subgraph.nodes())
+                        list_node_names = []
+                        for n in range(len(self.graphs)):
+                            node_names = [i[n] for i in get_node_names]
+                            list_node_names.append(node_names)
+    
+                        add_sphere_residues(self.graphs, list_node_names, self.output_path, nodes[0])
+
                     else:
-                        bfs_subgraph.nodes[nodes2]['chain_id'] = None
+                        print(f"The subgraph centered at the {nodes[0]} node does not satisfies the requirements")
+            if count_pep_nodes == 0:
+                print(f'No peptide nodes were found in the association graph. No subgraph will be generated.')
+            pass
 
-                number_peptide_nodes = len([i for i in bfs_subgraph.nodes if i[0].startswith('C')])
-                if bfs_subgraph.number_of_nodes() >= 14 and nx.diameter(bfs_subgraph) >= 3 and number_peptide_nodes >=3:
-                    node_colors = [bfs_subgraph.nodes[node]['chain_id'] for node in bfs_subgraph.nodes]
-                    nx.draw(bfs_subgraph, with_labels=True, node_color=node_colors)
-                    plt.savefig(path.join(self.output_path,f'plot_bfs_{nodes[0]}_{self.run_name}.png'))
-                    plt.clf()
+    def create_subgraph_with_neighbors(self, association_graph, node, max_nodes):
+        """
+        This is mostly an implementation of the BFS algorithm with some modification
+        
+        Parameters:
+            graph (nx.Graph): The original graph.
+            node: The node for which the subgraph is to be created.
+            max_nodes (int): The maximum number of nodes allowed in the subgraph.
+            
+        Returns:
+            nx.Graph: 
+        """
+        # Initialize a set to store visited nodes
+        graphs = self.graphs
+        associated_graph = self.associated_graphs
+        visited = set()
+        
+        # Initialize the subgraph with the given node
+        subgraph = nx.Graph()
+        subgraph.add_node(node)
+        visited.add(node)
+        
+        # Queue to store nodes to visit next
+        queue = [(node, None)]  # (node, parent)
 
-                    get_node_names = list(bfs_subgraph.nodes())
-                    list_node_names = []
-                    for n in range(len(self.graphs)):
-                        node_names = [i[n] for i in get_node_names]
-                        list_node_names.append(node_names)
-  
-                    add_sphere_residues(self.graphs, list_node_names, self.output_path, nodes[0])
 
-                else:
-                    print(f"The subgraph centered at the {nodes[0]} node does not satisfies the requirements")
-        if count_pep_nodes == 0:
-            print(f'No peptide nodes were found in the association graph. No subgraph will be generated.')
-        pass
+        while queue and subgraph.number_of_nodes() < max_nodes: #the max nodes only act here when start the new layer (getting the new current node)
+            # Once it goes inside the neighbor loop, it will finish it even that it means to generate more neigbors than expected
+            # Pop the node and its parent from the queue
+            current_node, parent = queue.pop(0)
+            
+            # If not the starting node, add edge to its parent
+            if parent is not None:
+                subgraph.add_edge(current_node, parent)
+            
+            # Iterate over neighbors of the current node
+            neighbors = list(association_graph.neighbors(current_node))
+
+            #get euclidian distance between current node and neighbors to sort the neighbors list 
+            #Mol A
+            dists = []
+            
+            for graph in graphs:
+                graph_matrix = graph[0].graph["pdb_df"]
+                current_node_index = graph_matrix[graph_matrix['node_id'] == current_node[0]].index[0]
+                neighbor_indices = [graph_matrix[graph_matrix['node_id'] == nodes[0]].index[0] for nodes in neighbors if nodes != current_node]
+                dist = compute_distmat(graph_matrix).iloc[neighbor_indices, current_node_index]
+                dists.append(dist)
+
+            # Get a average distance for sorting
+            average_list = sum(dists)/len(graphs)
+            
+            # Pair each nodes with its corresponding numeric value
+            paired_list = list(zip(average_list, neighbors))
+
+            # Sort the pairs based on the numeric values
+            paired_list.sort()
+
+            # Extract the sorted list of nodes
+            neighbors_sorted = [string for _, string in paired_list]
+
+            for neighbor in neighbors_sorted:
+                # If neighbor is not visited and adding it won't exceed max_nodes
+                # if neighbor not in visited and subgraph.number_of_nodes() + 1 <= max_nodes:
+                if neighbor not in visited: #try to visit all in the neighbor layer
+                    # Add the neighbor to the subgraph
+                    subgraph.add_node(neighbor)
+                    
+                    # Mark neighbor as visited
+                    visited.add(neighbor)
+                    
+                    # Add neighbor to the queue -> so that the neighbor will become current nodes and generate new neighbors
+                    queue.append((neighbor, current_node))
+        
+        # Add edges between selected nodes based on the original graph
+        for u in subgraph.nodes():
+            for v in subgraph.nodes():
+                if u != v and association_graph.has_edge(u, v):
+                    subgraph.add_edge(u, v)
+        
+        return subgraph

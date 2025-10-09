@@ -4,6 +4,7 @@ __pycache__/
 *.pdb
 *.png
 *.zip
+*.cif
 Analysis/*
 Analysis/
 Analysis/**/*
