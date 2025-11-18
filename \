@@ -578,12 +578,12 @@ def find_triads(graph_data, classes, config, checks):
             d2 = contact_map[u_index, w_index]
             d3 = contact_map[center_index, w_index]
 
-            u_ca = np.array(G.nodes[outer_sorted[0]].get("ca_coord", (np.nan, np.nan, np.nan)))
-            w_ca = np.array(G.nodes[outer_sorted[1]].get("ca_coord", (np.nan, np.nan, np.nan)))
+            u_ca = np.array(G.nodes[u].get("ca_coord", (np.nan, np.nan, np.nan)))
+            w_ca = np.array(G.nodes[w].get("ca_coord", (np.nan, np.nan, np.nan)))
             center_ca = np.array(G.nodes[center].get("ca_coord", (np.nan, np.nan, np.nan)))
 
-            u_cb = np.array(G.nodes[outer_sorted[0]].get("cb_coord", (np.nan, np.nan, np.nan)))
-            w_cb = np.array(G.nodes[outer_sorted[1]].get("cb_coord", (np.nan, np.nan, np.nan)))
+            u_cb = np.array(G.nodes[u].get("cb_coord", (np.nan, np.nan, np.nan)))
+            w_cb = np.array(G.nodes[w].get("cb_coord", (np.nan, np.nan, np.nan)))
             center_cb = np.array(G.nodes[center].get("cb_coord", (np.nan, np.nan, np.nan)))
 
 
@@ -591,10 +591,13 @@ def find_triads(graph_data, classes, config, checks):
                 chi = triad_chirality_with_cb(u_ca, center_ca, w_ca, u_cb, center_cb, w_cb, majority_only=True)["chi"]
             else:
                 chi = 0
-                print(f"Nan: {u_cb, center_cb, w_cb}")
-                print(u, center, w)
-                input()
-             
+
+            print(u, center, w)
+            print(u_ca, center_ca, w_ca)
+            print(u_cb, center_cb, w_cb)
+            print(chi)
+
+
             rsa1 = rsa[outer_sorted[0]]*100
             rsa2 = rsa[center]*100
             rsa3 = rsa[outer_sorted[1]]*100
@@ -1780,49 +1783,6 @@ def pair_indices_from_tri_full(tri_full: Tuple, role: str) -> Tuple[int, int]:
 #     key = frozenset(shared)
 #     return map1.get(key) == map2.get(key)
 
-def _extract_chain_from_idx(idx, maps):
-    res_tuple = maps["residue_maps_unique"].get(idx, None)
-    if res_tuple is None:
-        return None
-    return res_tuple[0]  # cadeia
-
-def _build_threshold_matrix(nodes, maps, threshold_cfg):
-    K = len(nodes)
-    dim = len(nodes[0])
-
-    # caso seja float, retorna matriz cheia
-    if not isinstance(threshold_cfg, dict):
-        return np.full((K, K), float(threshold_cfg), dtype=float)
-
-    default_thr = float(threshold_cfg.get("default", 2.0))
-    mix_thr = float(threshold_cfg.get("mix", default_thr))
-
-    # chains[p, i] cadeia do no i na proteina p
-    chains = np.empty((dim, K), dtype=object)
-    for p in range(dim):
-        for i in range(K):
-            chains[p, i] = _extract_chain_from_idx(nodes[i][p], maps)
-
-    # all_eq True se para todos p a cadeia de i e j sao iguais
-    all_eq = np.ones((K, K), dtype=bool)
-    for p in range(dim):
-        ci = chains[p, :][:, None]  # Kx1
-        cj = chains[p, :][None, :]  # 1xK
-        all_eq &= (ci == cj)
-
-    # threshold por cadeia
-    def thr_for_chain(c):
-        return float(threshold_cfg.get(c, default_thr)) if c is not None else default_thr
-
-    row_chain = chains[0, :]                                   # K
-    row_thr = np.vectorize(thr_for_chain)(row_chain).astype(float)  # K
-
-    # base com mix e substitui onde all_eq usando broadcast
-    T = np.full((K, K), mix_thr, dtype=float)
-    T = np.where(all_eq, row_thr[:, None], T)
-
-    return T
-
 def create_std_matrix(nodes, matrices: dict, maps: dict, threshold: float = 3.0):
     dim = len(nodes[0])
     K = len(nodes) 
@@ -1844,12 +1804,6 @@ def create_std_matrix(nodes, matrices: dict, maps: dict, threshold: float = 3.0)
             stacked_pruned[p,  i, :] = matrices["dm_pruned"][idx[i],  idx]
             stacked_thresh[p, i, :]  = matrices["dm_thresholded"][idx[i], idx]
 
-    mask_invalid_pruned = np.any((stacked_pruned == 0) | np.isnan(stacked_pruned), axis=0)
-    mask_invalid_thresh = np.any((stacked_thresh == 0) | np.isnan(stacked_thresh), axis=0)
-
-    stacked_pruned[:, mask_invalid_pruned] = np.nan
-    stacked_thresh[:, mask_invalid_thresh] = np.nan
-
     var_pruned = np.std(stacked_pruned, axis=0)    
     var_thresh = np.std(stacked_thresh, axis=0)  
 
@@ -1859,14 +1813,12 @@ def create_std_matrix(nodes, matrices: dict, maps: dict, threshold: float = 3.0)
     var_pruned = np.where(mask_pruned, np.nan, var_pruned)
     var_thresh = np.where(mask_thresh, np.nan, var_thresh)        
 
-    T = _build_threshold_matrix(nodes, maps, threshold)
-
-    mask_valid = (0 < var_pruned) & (var_pruned < T)
+    mask_valid = (0 < var_pruned) & (var_pruned < threshold)
     mask_invalid = ~mask_valid
     var_pruned[mask_valid] = 1
     var_pruned[mask_invalid] = np.nan
 
-    mask_valid = (0 < var_thresh) & (var_thresh < T)
+    mask_valid = (0 < var_thresh) & (var_thresh < threshold)
     mask_invalid = ~mask_valid
     var_thresh[mask_valid] = 1
     var_thresh[mask_invalid] = np.nan
@@ -2044,15 +1996,14 @@ def association_product(graph_data: list,
             # input(f"Quantidade de components: {components_len} | Tamanho cada comp: {nodes_qtds}")
             for component in components:
                 len_component = len(component)
-                log.debug(f"[{passo}] {comp_id}: Processing component {processed_status} / {components_len} with {len_component} nodes")
+                log.debug(f"{comp_id}: Processing component {processed_status} / {components_len} with {len_component} nodes")
                 processed_status += 1
                 if len_component <= 4: 
-                    log.debug(f"[{passo}] {comp_id} Skipping component {processed_status-1}, because it has just {len_component} nodes")
+                    log.debug(f"{comp_id} Skipping component {processed_status-1}, because it has just {len_component} nodes")
                     continue
                 subG = nx.Graph()
                 subG.add_nodes_from(component)
 
-                log.debug(f"[{passo}] {comp_id} Adding edges...")
                 for u in component:
                     for v in G.neighbors(u):
                         if v in component:
@@ -2065,7 +2016,6 @@ def association_product(graph_data: list,
                 #     }
 
                 dm_thresh_graph = np.zeros((metadata["total_length"], metadata["total_length"]))
-                log.debug(f"[{passo}] Creating dm_thresh_graph matrices...")
                 for u, v in subG.edges():
                     for p, (res_u, res_v) in enumerate(zip(u, v)):
                         if res_u != res_v:
@@ -2096,15 +2046,13 @@ def association_product(graph_data: list,
                     nodes_indices.append(node_converted)
 
                 save(f"comp_id_{comp_id}", "nodes_indices", nodes_indices)
-                log.debug(f"[{passo}] {comp_id} Creating the std_matrix...")
+
                 matrices_mul, maps_mul = create_std_matrix(
                     nodes=nodes_indices,
                     matrices=matrices_dict,
                     maps=maps,
                     threshold=config["distance_diff_threshold"]
                 )
-
-                log.debug(f"[{passo}] {comp_id} Finished creating the std_matrix.")
 
                 save(f"comp_id_{comp_id}", "matrices_mul", matrices_mul)
                 save(f"comp_id_{comp_id}", "maps_mul", maps_mul)
@@ -2122,12 +2070,6 @@ def association_product(graph_data: list,
                 )
 
                 if not debugar_: tracer.enabled=False
-
-                # if passo == 2 and len(nodes) > 5000:
-                #     Graphs.extend([([subG], 1)])
-                #     return {
-                #         "AssociatedGraph": Graphs
-                #     }
 
                 frames, union_graph, error = generate_frames(
                     matrices=matrices_mul,
@@ -2348,14 +2290,13 @@ def generate_frames(matrices, maps, len_component, chunk_id, step, debug=False, 
 
     if debug: log.debug("Traversing nodes in descending order of degree ")
     for node_id, node in enumerate(order_all): # Percorremos os nós na ordem do maior grau para o menor grau
-        # if tracer and tracer.enabled:
-        #     # passa a matriz A do componente que você está explorando aqui; se for o grafo inteiro A, serve
-        #     tracer.start_anchor(anchor=int(node), A_sub=A, nodes_map=np.arange(A.shape[0], dtype=int))
+        if tracer and tracer.enabled:
+            # passa a matriz A do componente que você está explorando aqui; se for o grafo inteiro A, serve
+            tracer.start_anchor(anchor=int(node), A_sub=A, nodes_map=np.arange(A.shape[0], dtype=int))
         str_node = f"{node_id}/{len_order}"
         if debug: log.debug(f"Node: {str_node}") 
-        log.debug(f"[{str_node}] Making copy of inter list...")
+
         inter = C[int(node)].copy() # Primeiro começamos pegando a linha de coerência que representa o nó e fazemos uma cópia dela (para não modificar o original)
-        log.debug(f"[{str_node}] Copy finished")
         accepted = (int(node),) # Iniciamos os nós que serão percorridos com o próprio nó inicial
 
         neigh = N_adj[int(node)]
@@ -2367,10 +2308,8 @@ def generate_frames(matrices, maps, len_component, chunk_id, step, debug=False, 
         frontier_idx = neigh[inter[neigh]]
         if frontier_idx.size == 0:
             continue
-        
-        log.debug(f"[{str_node}] Transforming frontier to set...")
+
         frontier = set(int(v) for v in frontier_idx) # Lista da fronteira 
-        log.debug(f"[{str_node}] Finished transforming.")
 
         # Vamos criar um stack para realizar um busca em profundidade pelo LIFO (Last In First Out)
         stack = []
@@ -2398,16 +2337,13 @@ def generate_frames(matrices, maps, len_component, chunk_id, step, debug=False, 
         """
         if debug: log.debug(f"[{str_node}] Creating groups...")
         groups = expand_groups(accepted, inter, frontier)
-        if debug: log.debug(f"[{str_node}] Groups created: {len(groups)}")
+        if debug: log.debug(f"[{str_node}] Groups created: {groups}")
         # print(groups)
-        if debug: log.debug(f"[{str_node}] Adding to tracer...")
-        # if tracer and tracer.enabled:
-        #     tracer.tick(current=int(node), chosen=accepted, frontier=frontier)
-
         if debug: log.debug(f"[{str_node}] Adding to stack...")
+        if tracer and tracer.enabled:
+            tracer.tick(current=int(node), chosen=accepted, frontier=frontier)
 
-        for i, (sig, chosen_g, inter_g, frontier_g) in enumerate(groups):
-            log.debug(f"[{str_node}] {i}/{len(groups)} group")
+        for sig, chosen_g, inter_g, frontier_g in groups:
             # Evitamos revisitar exatamente o mesmo estado (mesmo conjunto escolhido, mesma máscara e mesma fronteira),
             # o que previne ciclos e explosão desnecessária de busca.
             if sig in visited_states:
@@ -2416,7 +2352,7 @@ def generate_frames(matrices, maps, len_component, chunk_id, step, debug=False, 
                 continue
             visited_states.add(sig)
             added = tuple(sorted(set(chosen_g) - set(accepted)))
-
+            # Empilhamos o novo estado completo para exploração em profundidade.
             stack.append((chosen_g, inter_g, frontier_g, added))
             stack_small.append((chosen_g, frontier_g))
             pushes += 1
@@ -2432,10 +2368,10 @@ def generate_frames(matrices, maps, len_component, chunk_id, step, debug=False, 
             str_stack = f"{str_node}|{current_stack}"
             if debug: log.debug(f"[{str_node}] Current stack: {current_stack}")
             chosen_t, inter_m, frontier_t, added_t = stack.pop()
-            # if tracer and tracer.enabled:
-            #     tracer.tick(current=added_t if added_t else (),
-            #                 chosen=chosen_t,
-            #                 frontier=frontier_t)
+            if tracer and tracer.enabled:
+                tracer.tick(current=added_t if added_t else (),
+                            chosen=chosen_t,
+                            frontier=frontier_t)
             pops += 1
             chosen = list(chosen_t)
             frontier = set(frontier_t)
@@ -2476,11 +2412,11 @@ def generate_frames(matrices, maps, len_component, chunk_id, step, debug=False, 
                             edge_key = frozenset(tuple(sorted(e)) for e in es)
                             if edge_key not in seen_edge_sets:                       
                                 seen_edge_sets.add(edge_key)
-                                # if tracer and tracer.enabled:
-                                #     tracer.tick(current=None,
-                                #                 chosen=chosen,
-                                #                 frontier=(),
-                                #                 accepted_edges_latest=es)
+                                if tracer and tracer.enabled:
+                                    tracer.tick(current=None,
+                                                chosen=chosen,
+                                                frontier=(),
+                                                accepted_edges_latest=es)
                                 if debug: log.debug(f"[{str_stack}] Converting edges...")
                                 _, edges_idx, edges_res = convert_edges_to_residues(es, maps)
                                 if debug: log.debug(f"[{str_stack}] Conversion finished.")
@@ -2506,11 +2442,11 @@ def generate_frames(matrices, maps, len_component, chunk_id, step, debug=False, 
                     # return _, _, True
             if to_break:
                 break
-        log.debug(f"[{str_node}] Finished while stack.")
-        # if tracer and tracer.enabled:
-        #     out_file = tracer.end_anchor(name_prefix=f"chunk{chunk_id}_step{step}_anchor{int(node)}")
-        #     if debug and out_file:
-        #         log.debug(f"[{str_node}][viz] salvo: {out_file}")
+
+        if tracer and tracer.enabled:
+            out_file = tracer.end_anchor(name_prefix=f"chunk{chunk_id}_step{step}_anchor{int(node)}")
+            if debug and out_file:
+                log.debug(f"[{str_node}][viz] salvo: {out_file}")
 
     
     if debug: log.debug("Sorting frames...")

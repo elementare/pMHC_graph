@@ -1,13 +1,13 @@
 {
   "settings": {
     "run_name": "pdbInput",
-    "output_path": "data/pdbInput",
+    "output_path": "data/pdbVirus",
     "debug": true,
     "track_steps": false,
     "centroid_threshold": 10.0,
     "centroid_granularity": "ca_only",
     "exclude_waters": true,
-    "check_rsa": true,
+    "check_rsa": false,
     "check_depth": false,
     "rsa_filter": 0.1,
     "depth_filter": 10.0,
@@ -33,12 +33,9 @@
 
   "inputs": [
     {
-      "path": ["pdb_input/pmhc_mage3_5brz_renumber.pdb","pdb_input/pmhc_titin_5bs0_renumber.pdb"],
-      "enable_tui": false,
-      "extensions": [".pdb", ".pdb.gz", ".cif"],
-      "constrains": [
-        { "name": "MHC1", "file_name_contains": "pmhc" }
-      ]
+      "path": ["pdb_input/"],
+      "enable_tui": true,
+      "extensions": [".pdb", ".pdb.gz", ".cif"] 
     }
   ],
   "constrains": {

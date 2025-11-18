@@ -409,7 +409,7 @@ def _build_associated_graph_from_string(file_string: str, run_name: str, out_dir
 
     # Se quiser figuras e afins, pode habilitar aqui
     G.draw_graph_interactive(show=False, save=True)
-    G.draw_graph(show=False, save=True)
+    # G.draw_graph(show=False, save=True)
     G.align_all_frames()
     G.create_pdb_per_protein()
 

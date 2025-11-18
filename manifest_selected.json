@@ -11,7 +11,7 @@
     "check_depth": false,
     "rsa_filter": 0.1,
     "depth_filter": 10.0,
-    "distance_diff_threshold": 3.0,
+    "distance_diff_threshold": {"A": 2.0, "C": 3.0},
     
     "distance_bins": 5,
     "rsa_bins": 3,
