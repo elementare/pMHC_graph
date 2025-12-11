@@ -111,12 +111,17 @@ def _make_json_from_associated_graph(G: AssociatedGraph, out_json: Path) -> None
         name = Path(pdb_file).stem
 
         nodes = list(graph_raw["graph"].nodes)
+        peptide_nodes = [node for node in nodes if node.split(":")[0] == "C"]
+        mhc_nodes = [node for node in nodes if node.split(":")[0] == "A"]
+
         edges = list(graph_raw["graph"].edges)
         neighbors = {str(n): [str(nb) for nb in graph_raw["graph"].neighbors(n)] for n in nodes}
 
         payload["original_graphs"][_id] = {
             "name": name,
             "nodes": nodes,
+            "peptide_nodes": peptide_nodes,
+            "mhc_nodes": mhc_nodes,
             "edges": edges,
             "neighbors": neighbors,
         }
@@ -125,9 +130,12 @@ def _make_json_from_associated_graph(G: AssociatedGraph, out_json: Path) -> None
         payload[j] = {"comp": j, "frames": {}}
         for i in range(len(comps[0])):
             nodes = list(comps[0][i].nodes)
+            peptide_nodes = [node for node in nodes if all(node_.startswith("C") for node_ in node)]
+            mhc_nodes = [node for node in nodes if all(node_.startswith("A") for node_ in node)]
+            mixed_nodes = [node for node in nodes if any(node_.startswith("C") for node_ in node)] 
             edges = list(comps[0][i].edges)
             neighbors = {str(n): [str(nb) for nb in comps[0][i].neighbors(n)] for n in nodes}
-            payload[j]["frames"][i] = {"nodes": nodes, "edges": edges, "neighbors": neighbors}
+            payload[j]["frames"][i] = {"nodes": nodes, "peptide_nodes": peptide_nodes, "mhc_nodes": mhc_nodes, "mixed_nodes": mixed_nodes, "edges": edges, "neighbors": neighbors}
 
     out_json.parent.mkdir(parents=True, exist_ok=True)
     with open(out_json, "w") as f:
@@ -166,6 +174,9 @@ def node_similarity_for_protein(frame, original_graphs, protein_keys, p):
     prot_name = og.get("name", prot_key)
 
     Vp = set(og["nodes"])
+    
+    pep_orig_nodes = [node for node in Vp if node.startswith("C")]
+    mhc_orig_nodes = [node for node in Vp if node.startswith("A")]
     inst = project_nodes_instances(nodes_assoc, p)
     Up = set(inst)
 
@@ -185,13 +196,15 @@ def node_similarity_for_protein(frame, original_graphs, protein_keys, p):
 
     unique_nodes_per_chain = {k: len(v) for k, v in groups.items()}
     unique_nodes_per_chain_json = json.dumps(unique_nodes_per_chain, ensure_ascii=False)
-
+    
     return dict(
         protein_index=p,
         protein_key=prot_key,
         protein_name=prot_name,
         total_nodes_associated=len(nodes_assoc),
         total_nodes_original=total_orig,
+        pep_orig_nodes=len(pep_orig_nodes),
+        mhc_orig_nodes=len(mhc_orig_nodes),
         frame_nodes_instances=total_inst,
         frame_nodes_unique=len(Up),
         node_coverage=node_coverage,
