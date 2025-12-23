@@ -102,10 +102,12 @@ class GraphConfig:
     # Misc
     verbose: bool = False
 
+    make_virtual_cb_for_gly: bool = True
+
 
 def make_default_config(
     *,
-    centroid_threshold: float = 10.0,
+    edge_threshold: float = 10.0,
     granularity: Granularity = "all_atoms",
     exclude_waters: bool = False,
     chains: Optional[Iterable[str]] = None,
@@ -113,13 +115,14 @@ def make_default_config(
     rsa_method: Literal["sr", "dssp"] = "dssp",
     dssp_exec: str = "mkdssp",
     dssp_acc_array: Literal["Sander", "Wilke", "Miller"] = "Wilke",
+    make_virtual_cb_for_gly: bool = True
 ) -> GraphConfig:
     """
     Helper for creating a ``GraphConfig`` with common defaults.
 
     Parameters
     ----------
-    centroid_threshold
+    edge_threshold
         Residue–residue distance cutoff (Å).
     granularity
         Centroid policy for node coordinates.
@@ -144,7 +147,7 @@ def make_default_config(
     return GraphConfig(
         chains=chains,
         exclude_waters=exclude_waters,
-        residue_distance_cutoff=float(centroid_threshold),
+        residue_distance_cutoff=float(edge_threshold),
         water_distance_cutoff=6.0,
         store_distance_matrix=True,
         compute_rsa=compute_rsa,
@@ -157,4 +160,5 @@ def make_default_config(
         allow_empty_chains=False,
         granularity=granularity,
         verbose=False,
+        make_virtual_cb_for_gly=make_virtual_cb_for_gly
     )

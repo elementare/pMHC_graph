@@ -7,6 +7,9 @@ from SERD_Addon.classes import StructureSERD
 from collections import defaultdict
 from os import path
 from Bio import PDB
+from Bio.PDB import PDBParser, MMCIFParser
+from Bio.PDB.PDBIO import PDBIO
+from Bio.PDB.mmcifio import MMCIFIO
 import time
 import numpy as np
 import networkx as nx
@@ -14,38 +17,44 @@ from typing import Tuple, List, Dict, Optional, Any, Union
 from memory_profiler import profile
 from core.config import make_default_config
 from core.tracking import save
+import gemmi
+import os
 
 logger = logging.getLogger("Preprocessing")
 
 
 def remove_water_from_pdb(source_file, dest_file):
-    """Remove water molecules (HOH) from a PDB file and save the cleaned version."""
+    """Remove water molecules from a PDB or mmCIF file and save the cleaned version safely."""
     
-    if path.exists(dest_file):
+    if os.path.exists(dest_file):
         logger.debug(f"The file {dest_file} already exists.")
-    else:
-        parser = PDB.PDBParser(QUIET=True)
-        structure = parser.get_structure("protein", source_file)
-        
-        io = PDB.PDBIO()
-        io.set_structure(structure)
-        
-        class NoWaterSelect(PDB.Select):
-            def accept_residue(self, residue):
-                return residue.get_resname() != "HOH"
-        
-        io.save(dest_file, select=NoWaterSelect())
-        logger.debug(f"Saved cleaned PDB file: {dest_file}")
+        return
 
+    suffix = source_file.lower()
+    is_cif = suffix.endswith((".cif", ".mmcif", ".mcif"))
+
+    st = gemmi.read_structure(source_file)
+
+    for model in st:
+        model.remove_waters()
+
+    if is_cif:
+        doc = st.make_mmcif_document()
+        with open(dest_file, "w") as f:
+            f.write(doc.as_string())
+    else:
+        st.write_pdb(dest_file)
+
+    logger.debug(f"Saved cleaned structure without waters: {dest_file}")
+    
 def get_exposed_residues(graph: Graph, rsa_filter=0.1, depth_filter: Union[float, None]=10.0, selection_params=None) -> nx.Graph:
     selection_params = selection_params or {}
-    
+
     if rsa_filter is None:
         graph.create_subgraph(name="exposed_residues")
     else:
         graph.create_subgraph(name="exposed_residues", rsa_threshold=rsa_filter)
     
-    # print(f"Neighbors after rsa filter: {[node for node in graph.get_subgraph(name='exposed_residues').neighbors('C:ASP:4')]}")
     if not any(key in selection_params for key in ("chains", "residues")):
         expo = graph.get_subgraph(name="exposed_residues")
         if expo is not None:
@@ -186,36 +195,86 @@ def _merge_constraints(base: Dict[str, Any], add: Dict[str, Any]) -> Dict[str, A
                     lst.append(p)
     return out
 
-def load_manifest(manifest_path: Optional[str]) -> Dict[str, Any]:
-    if not manifest_path:
-        return {}
-    with open(manifest_path, "r") as f:
-        data = json.load(f)
+def _infer_is_dir_or_file(path_str: str) -> str:
+    p = Path(path_str).expanduser()
+    if p.exists():
+        return "dir" if p.is_dir() else "file"
+    typical_exts = [".pdb", ".pdb.gz", ".cif", ".ent", ".mmcif"]
+    return "file" if any(path_str.endswith(ext) for ext in typical_exts) else "dir"
 
-    data.setdefault("inputs", [])
-    data.setdefault("constrains", {})
-    return data
+def list_struct_files(folder: Path, extensions: List[str]) -> List[Path]:
+    exts = set(extensions or [".pdb", ".pdb.gz", ".cif"])
+    files: List[Path] = []
+    for p in folder.rglob("*"):
+        if p.is_file():
+            for ext in exts:
+                if str(p.name).endswith(ext):
+                    files.append(p)
+                    break
+    files.sort()
+    return files
 
-def resolve_selection_params_for_file(
-    file_path: Path, manifest: Dict[str, Any]
-) -> Dict[str, Any]:
-    """
-    Encontra e mescla todos os 'constrains' aplicáveis a file_path,
-    com base em regras definidas em manifest['inputs'].
-    """
+def collect_selected_files_from_manifest(manifest):
+    results = []
+
+    for rule in manifest.get("inputs", []):
+        path_val = rule.get("path")
+        if not path_val:
+            continue
+
+        paths = path_val.split(",") if isinstance(path_val, str) else list(path_val)
+        extensions = rule.get("extensions") or [".pdb", ".pdb.gz", ".cif"]
+        enable_tui = bool(rule.get("enable_tui", False))
+
+        for p_str in paths:
+            kind = _infer_is_dir_or_file(p_str)
+            p = Path(p_str).expanduser().resolve()
+
+            if kind == "file":
+                results.append({"input_path": str(p), "name": p.name})
+            else:
+                if enable_tui:
+                    # TUI no MESMO formato que você usava
+                    names = list_pdb_files(str(p), extensions=extensions)
+                    selected = get_user_selection(names, str(p))
+                    for full_path, fname in selected:
+                        results.append({"input_path": str(Path(full_path).resolve()),
+                                        "name": fname})
+                else:
+                    # modo não interativo: pega todos do diretório (sem recursão, estilo original)
+                    if not p.exists() or not p.is_dir():
+                        continue
+                    for fname in sorted(os.listdir(p)):
+                        if any(fname.endswith(ext) for ext in extensions):
+                            full = (p / fname).resolve()
+                            results.append({"input_path": str(full), "name": fname})
+
+    # dedup
+    seen = set()
+    out = []
+    for it in results:
+        if it["input_path"] not in seen:
+            seen.add(it["input_path"])
+            out.append(it)
+    return out
+
+def resolve_selection_params_for_file(file_path: Path, manifest: Dict[str, Any]) -> Dict[str, Any]:
     if not manifest:
         return {}
-
     fname = file_path.name
     fpath_str = str(file_path.resolve())
     merged: Dict[str, Any] = {}
-
     for rule in manifest.get("inputs", []):
-        paths: List[str] = rule.get("path") or []
+        paths = rule.get("path")
+        if not paths:
+            continue
+        if isinstance(paths, str):
+            paths = paths.split(",")
+
         hit_path = False
         for p in paths:
-            p_obj = Path(p)
-            if any(ch in p for ch in "*?[]"): 
+            p_obj = Path(p).expanduser()
+            if any(ch in p for ch in "*?[]"):
                 if fnmatch.fnmatch(fpath_str, str(p)):
                     hit_path = True
                     break
@@ -232,69 +291,52 @@ def resolve_selection_params_for_file(
                     if str(p) in fpath_str:
                         hit_path = True
                         break
-
         if not hit_path:
             continue
 
-        for c in (rule.get("constrains") or []):
+        for c in (rule.get("selectors") or []):
             name = c.get("name")
             if not name:
                 continue
             if not _name_contains(fname, c.get("file_name_contains")):
                 continue
-            spec = manifest.get("constrains", {}).get(name, {})
+            spec = manifest.get("selectors", {}).get(name, {})
             merged = _merge_constraints(merged, spec)
-
     return merged
 
+def create_graphs(manifest: Dict) -> List[Tuple]:
 
-# ---------------------- create_graphs (mantendo sua seleção) ----------------------
+    S = manifest["settings"]
 
-def create_graphs(args) -> List[Tuple]:
-    # Load the manifest for dealing with files
-    manifest = load_manifest(getattr(args, "manifest", None))
+    output_path = Path(S["output_path"]).expanduser().resolve()
+    output_path.mkdir(parents=True, exist_ok=True)
 
-    pdb_directory = args.folder_path
-    if not pdb_directory:
-        raise Exception("You must provide the path for PDB folder")
-
-    if not args.files_name:
-        pdb_files = list_pdb_files(pdb_directory)
-        selected_files = get_user_selection(pdb_files, pdb_directory)
-  
-        selected_files = [
-            {"input_path": pair[0], "name": pair[1]} for pair in selected_files
-        ]
-    else:
-        file_names = args.files_name.split(",")
-        selected_files = [
-            {"input_path": str(Path(pdb_directory) / fname), "name": fname}
-            for fname in file_names
-        ]
-
-    Path(args.output_path).mkdir(parents=True, exist_ok=True)
+    selected_files = collect_selected_files_from_manifest(manifest)
+    if not selected_files:
+        raise Exception("Nenhum arquivo selecionado a partir do manifest")
 
     graph_config = make_default_config(
-        centroid_threshold=args.centroid_threshold,
-        granularity=args.centroid_granularity,
-        exclude_waters=args.exclude_waters,
+        edge_threshold=S["edge_threshold"],
+        granularity=S["node_granularity"],
+        exclude_waters=S["exclude_waters"],
+        dssp_acc_array=S["rsa_table"]
     )
 
     graphs: List[Tuple] = []
-    i = 1
+    start = time.perf_counter()
     for file_info in selected_files:
         orig_path = Path(file_info["input_path"]).resolve()
-        graph_path: Path
-
-        if args.exclude_waters:
+        if S["exclude_waters"]:
             cleaned_name = file_info["name"]
             if cleaned_name.endswith(".pdb.gz"):
                 cleaned_name = cleaned_name[:-7] + "_nOH.pdb"
             elif cleaned_name.endswith(".pdb"):
                 cleaned_name = cleaned_name[:-4] + "_nOH.pdb"
+            elif cleaned_name.endswith(".cif"):
+                cleaned_name = cleaned_name[:-4] + "_nOH.cif"
             else:
                 cleaned_name = cleaned_name + "_nOH.pdb"
-            cleaned_path = (Path(args.folder_path or ".") / cleaned_name).resolve()
+            cleaned_path = (orig_path.parent / cleaned_name).resolve()
             remove_water_from_pdb(str(orig_path), str(cleaned_path))
             graph_path = cleaned_path
         else:
@@ -302,34 +344,32 @@ def create_graphs(args) -> List[Tuple]:
 
         graph_instance = Graph(config=graph_config, graph_path=str(graph_path))
 
-        if args.check_depth:
+        if S["check_depth"]:
             start_time = time.time()
             depth = calculate_residue_depth(
                 pdb_file_path=str(graph_path),
-                serd_config=args.serd_config,
+                serd_config=S.get("serd_config"),
             )
             logger.debug(f"Depth calculated in {time.time() - start_time} seconds")
             depth["ResNumberChain"] = depth["ResidueNumber"].astype(str) + depth["Chain"]
             graph_instance.depth = depth
         else:
-            args.depth_filter = None
             depth = None
 
-        # Resolve constraints
         selection_params = resolve_selection_params_for_file(orig_path, manifest)
 
-        # Extrai subgrafo (expostos + constraints resolvidos)
         subgraph = get_exposed_residues(
             graph=graph_instance,
-            rsa_filter=args.rsa_filter,
-            depth_filter=args.depth_filter,
-            selection_params=selection_params or {},  # sempre dict
+            rsa_filter=S.get("rsa_filter"),
+            depth_filter=S.get("depth_filter") if S.get("depth_check") else None,
+            selection_params=selection_params or {},
         )
 
         subgraph.graph["depth"] = depth
 
         save("create_graphs", f"{graph_path.stem}_subgraph", subgraph)
-
         graphs.append((subgraph, str(orig_path)))
+    end = time.perf_counter()
 
+    logger.debug(f"Took {end - start:.6f} seconds to create graphs")
     return graphs

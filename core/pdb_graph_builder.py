@@ -94,7 +94,6 @@ def _centroid(coords: np.ndarray) -> np.ndarray:
     """Return centroid of an (N, 3) coordinate array."""
     return coords.mean(axis=0)
 
-
 def _node_id(chain_id: str, res: Residue, kind: str = "residue") -> str:
     """Build a stable node identifier: 'A:GLY:42' or 'A:HOH:2001'."""
     _, resseq, icode = res.id
@@ -278,6 +277,7 @@ class PDBGraphBuilder:
 
         if self.config.rsa_method == "dssp":
             model = self.structure[self.config.model_index]
+
             dssp = DSSP(
                 model,
                 self.pdb_path,
@@ -362,7 +362,7 @@ class PDBGraphBuilder:
     def _centroid_mask_for_group(self, g: pd.DataFrame) -> pd.Series:
         """
         Return a boolean mask selecting which atoms of a residue group `g` are
-        used to compute the centroid, according to `config.centroid_granularity`.
+        used to compute the centroid, according to `config.node_granularity`.
 
         Notes
         -----
@@ -407,7 +407,105 @@ class PDBGraphBuilder:
         if not mask.any():
             mask = heavy  # ultimate fallback
         return mask
-    
+
+
+    def _extract_ca_cb(self, raw_df: pd.DataFrame) -> Dict[str, Dict[str, Tuple[float, float, float]]]:
+        """
+        Para cada node_id, retorna tuplas (x,y,z) para CA e CB.
+        Se não existir, retorna (nan, nan, nan).
+        Critério: prioriza altloc vazio sobre não vazio; maior occupancy; menor b_factor; menor atom_number.
+        """
+        if raw_df.empty:
+            return {}
+
+        df = raw_df.copy()
+        df["AN"] = df["atom_name"].str.upper()
+        df = df[df["AN"].isin(["CA", "CB", "N", "C"])]
+
+        if df.empty:
+            return {}
+
+        # rank de escolha estável de conformero/altloc
+        df["_alt_rank"] = (df["alt_loc"].astype(str).str.strip() != "").astype(int)
+        df["_occ"] = df["occupancy"].fillna(0.0)
+        df["_bfac"] = df["b_factor"].fillna(np.inf)
+        df["_anum"] = df["atom_number"].fillna(np.inf)
+
+        df = df.sort_values(
+            ["node_id", "AN", "_alt_rank", "_occ", "_bfac", "_anum"],
+            ascending=[True, True, True, False, True, True],
+            kind="mergesort",
+        )
+
+        best = df.groupby(["node_id", "AN"], as_index=False).first()
+
+        pick = lambda an: best[best["AN"] == an].set_index("node_id")[["x_coord", "y_coord", "z_coord"]]
+        ca_tbl = pick("CA")
+        cb_tbl = pick("CB")
+        n_tbl  = pick("N")
+        c_tbl  = pick("C")
+
+        all_nodes = pd.Index(raw_df["node_id"].unique())
+        ca_tbl = ca_tbl.reindex(all_nodes)
+        cb_tbl = cb_tbl.reindex(all_nodes)
+        n_tbl  = n_tbl.reindex(all_nodes)
+        c_tbl  = c_tbl.reindex(all_nodes)
+
+        # também precisamos do nome do resíduo por node_id
+        resname_by_node = (
+            raw_df.drop_duplicates("node_id")
+                  .set_index("node_id")["residue_name"].str.upper()
+                  .reindex(all_nodes)
+        )
+
+        nan3 = (float("nan"), float("nan"), float("nan"))
+        out: Dict[str, Dict[str, Tuple[float, float, float]]] = {}
+
+        def _to_tuple(row) -> Tuple[float, float, float]:
+            if row is None or not hasattr(row, "values"):
+                return nan3
+            vals = row.values.astype(float)
+            if np.isnan(vals).any():
+                return nan3
+            return (float(vals[0]), float(vals[1]), float(vals[2]))
+
+        def _normalize(v: np.ndarray) -> np.ndarray:
+            n = np.linalg.norm(v)
+            if n == 0 or not np.isfinite(n):
+                return v
+            return v / n
+        
+
+        for nid in all_nodes:
+            ca_t = _to_tuple(ca_tbl.loc[nid] if nid in ca_tbl.index else None)
+            cb_t = _to_tuple(cb_tbl.loc[nid] if nid in cb_tbl.index else None)
+
+            # Se CB está ausente e resíduo é GLY e config permite, tenta CB virtual
+            if (np.isnan(cb_t[0]) or np.isnan(cb_t[1]) or np.isnan(cb_t[2])):
+                if getattr(self.config, "make_virtual_cb_for_gly", True) and resname_by_node.get(nid, "") == "GLY":
+                    ca_row = ca_tbl.loc[nid] if nid in ca_tbl.index else None
+                    n_row  = n_tbl.loc[nid]  if nid in n_tbl.index  else None
+                    c_row  = c_tbl.loc[nid]  if nid in c_tbl.index  else None
+
+                    if all(r is not None and not np.isnan(r.values.astype(float)).any() for r in [ca_row, n_row, c_row]):
+                        rCA = ca_row.values.astype(float)
+                        rN  = n_row.values.astype(float)
+                        rC  = c_row.values.astype(float)
+                        nvec = _normalize(rN - rCA)
+                        cvec = _normalize(rC - rCA)
+                        b = _normalize(nvec + cvec)
+                        cb_virtual = rCA - 1.522 * b
+                        cb_t = (float(cb_virtual[0]), float(cb_virtual[1]), float(cb_virtual[2]))
+                        out[nid] = {"ca_coord": ca_t, "cb_coord": cb_t, "cb_is_virtual": True}
+                    else:
+                        out[nid] = {"ca_coord": ca_t, "cb_coord": nan3, "cb_is_virtual": False}
+                else:
+                    out[nid] = {"ca_coord": ca_t, "cb_coord": cb_t, "cb_is_virtual": False}
+            else:
+                out[nid] = {"ca_coord": ca_t, "cb_coord": cb_t, "cb_is_virtual": False}
+
+        return out
+
     def _centroid_pdb_df_from_raw(self, raw_df: pd.DataFrame) -> pd.DataFrame:
         """
         Build a centroid-style pdb_df: one representative atom per residue `node_id`,
@@ -416,7 +514,7 @@ class PDBGraphBuilder:
 
         Granularity
         -----------
-        Controlled by `self.config.centroid_granularity`:
+        Controlled by `self.config.node_granularity`:
           - "all_atoms": all heavy atoms (element != 'H').
           - "backbone": heavy backbone atoms only (N, CA, C, O, OXT).
           - "side_chain": heavy side-chain atoms only; fallback to CA/CB if empty.
@@ -659,6 +757,8 @@ class PDBGraphBuilder:
         water_tuples = self._collect_waters(chains)
         raw_pdb_df, pdb_df, rgroup_df = self._make_atom_tables(chains)
         pdb_df = self._centroid_pdb_df_from_raw(raw_pdb_df)
+        ca_cb_map = self._extract_ca_cb(raw_pdb_df)
+        nan3 = (float("nan"), float("nan"), float("nan"))
         if not res_tuples:
             raise ValueError("No protein residues found for the selected chains.")
 
@@ -677,6 +777,11 @@ class PDBGraphBuilder:
         G = nx.Graph()
         for nid, res, cent in res_tuples:
             asa, rsa = asa_rsa.get(nid, (None, None))
+            extra = ca_cb_map.get(nid, {})
+            ca_coord = extra.get("ca_coord", nan3)
+            cb_coord = extra.get("cb_coord", nan3)
+            cb_is_virtual = bool(extra.get("cb_is_virtual", False))
+
             G.add_node(
                 nid,
                 kind="residue",
@@ -686,6 +791,9 @@ class PDBGraphBuilder:
                 icode=(res.id[2].strip() or ""),
                 centroid=tuple(float(x) for x in cent),
                 coords=np.array(cent, dtype=float),
+                ca_coord=ca_coord,
+                cb_coord=cb_coord,
+                cb_is_virtual=cb_is_virtual,
                 asa=None if asa is None else float(asa),
                 rsa=None if rsa is None else float(rsa),
             )
@@ -697,26 +805,23 @@ class PDBGraphBuilder:
             n1 = res_ids[a1]
             n2 = res_ids[a2]
 
-            row1 = pdb_df.set_index("node_id").loc[n1]
-            row2 = pdb_df.set_index("node_id").loc[n2]
+            # row1 = pdb_df.set_index("node_id").loc[n1]
+            # row2 = pdb_df.set_index("node_id").loc[n2]
 
-            
+            # n1_chain = row1["chain_id"]
+            # n2_chain = row2["chain_id"]
+            # n1_position = row1["residue_number"]
+            # n2_position = row2["residue_number"]
 
-
-            n1_chain = row1["chain_id"]
-            n2_chain = row2["chain_id"]
-            n1_position = row1["residue_number"]
-            n2_position = row2["residue_number"]
-
-            condition_1 = n1_chain == n2_chain
-            condition_2 = (
-                abs(n1_position - n2_position) < 0
-            )
+            # condition_1 = n1_chain == n2_chain
+            # condition_2 = (
+            #     abs(n1_position - n2_position) <= 1
+            # )
 
             d = float(dist_mat[a1, a2])
 
-            if not (condition_1 and condition_2):
-                G.add_edge(n1, n2, distance=d, kind="res-res")
+            # if not (condition_1 and condition_2):
+            G.add_edge(n1, n2, distance=d, kind="res-res")
             
         water_ids: List[str] = []
         water_centroids: Optional[np.ndarray] = None
@@ -734,6 +839,9 @@ class PDBGraphBuilder:
                     resseq=int(resseq),
                     icode=(icode.strip() or ""),
                     centroid=tuple(float(x) for x in cent),
+                    ca_coord=nan3,
+                    cb_coord=nan3,
+                    cb_is_virtual=False,
                     rsa=1.0,
                     asa=None
                 )

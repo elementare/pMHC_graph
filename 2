@@ -10,7 +10,6 @@ import networkx as nx
 import time
 # from graphein.protein.edges.distance import compute_distmat
 from os import path
-import os
 import pandas as pd
 from collections import Counter
 from typing import Any, FrozenSet, Tuple, List, Optional, Union, Dict, Set, Iterable, Sequence
@@ -305,62 +304,6 @@ def value_to_class(
         # Clamp to the maximum number of bins possible in the span
         max_inv_bins = math.ceil(span / bin_width)
         return max(1, min(class_name, max_inv_bins))
-    
-def dynamic_distance_to_classes(
-    distance_classes: Dict[str, Dict[str, float]],
-    value: float,
-    diff_threshold: float,
-    close_tolerance: float,
-) -> Optional[Union[str, List[str]]]:
-    """
-    distance_classes: { class_name: {"low": float, "high": float}, ... }
-    value: distance value (d1, d2, d3, ...)
-    diff_threshold: distance_diff_threshold (max allowed distance diff between triads)
-    close_tolerance: tolerance to say "this value is clearly in this bin"
-
-    Returns:
-        - None  -> no valid bin
-        - "bin_k" or ["bin_k"]  -> single bin
-        - ["bin_i", "bin_j", ...] -> multiple bins (near boundary)
-    """
-    # Filter only bins that could reasonably contain value
-    candidate_bins = []
-    for name, interval in distance_classes.items():
-        low = interval["low"]
-        high = interval["high"]
-        if low <= value <= high:
-            center = 0.5 * (low + high)
-            candidate_bins.append((name, low, high, center))
-
-    if not candidate_bins:
-        # Value is outside all dynamic bins
-        return None
-
-    # Choose primary bin: the one whose center is closest to value
-    primary = min(candidate_bins, key=lambda x: abs(value - x[3]))
-    primary_name, primary_low, primary_high, primary_center = primary
-
-    # If clearly inside this bin (center region), return only this one
-    if abs(value - primary_center) <= close_tolerance:
-        return [primary_name]
-
-    # Otherwise, build an uncertainty interval based on diff_threshold
-    low_unc = value - diff_threshold
-    high_unc = value + diff_threshold
-
-    # Collect all bins that intersect [low_unc, high_unc]
-    hits: List[str] = []
-    for name, interval in distance_classes.items():
-        low = interval["low"]
-        high = interval["high"]
-        # intersection check between [low_unc, high_unc] and [low, high]
-        if (low_unc <= high) and (high_unc >= low):
-            hits.append(name)
-
-    if not hits:
-        return None
-
-    return hits if len(hits) > 1 else hits[0]
 
 def create_classes_bin(total_length: float, bin_width: float): 
     """Creates a dictionary of bins with their respective ranges."""
@@ -370,32 +313,13 @@ def create_classes_bin(total_length: float, bin_width: float):
         for n in range(n_bins)
     }
  
-# def find_class(dictionary, value):
-#     for key in dictionary.keys():
-#         range_tuple = dictionary[key]
-#         if range_tuple[0] < value <= range_tuple[1]:
-#             return key
-#     else:
-#         return None
-
-def find_class(classes: Dict[str, Dict[str, float]], value: float):
-    """
-    Return all class names whose interval contains value.
-    Assumes structure:
-        classes = { "bin_1": {"low": ..., "high": ...}, ... }
-    """
-    hits = []
-    for name, interval in classes.items():
-        low = interval["low"]
-        high = interval["high"]
-        # choose your convention: [low, high] or [low, high)
-        if low <= value <= high:
-            hits.append(name)
-    if not hits:
+def find_class(dictionary, value):
+    for key in dictionary.keys():
+        range_tuple = dictionary[key]
+        if range_tuple[0] < value <= range_tuple[1]:
+            return key
+    else:
         return None
-    # Return single class or list depending on your current semantics
-    return hits[0] if len(hits) == 1 else hits
-
 
 def residue_to_tuple(res):
     res_split = res.split(":")
@@ -521,123 +445,6 @@ def triad_chirality_with_cb(
     }
 
 
-def collect_all_distances(graph_data, edge_threshold: float) -> np.ndarray:
-    """
-    Collect all pairwise distances from contact maps of all proteins,
-    restricted to 0 < d <= edge_threshold, using upper triangle only.
-    """
-    all_dists = []
-
-    for gd in graph_data:
-        contact_map = gd["contact_map"]
-        contact_map = np.asarray(contact_map)
-        if contact_map.ndim != 2 or contact_map.shape[0] != contact_map.shape[1]:
-            continue  # skip garbage
-
-        iu, ju = np.triu_indices_from(contact_map, k=1)
-        dists = contact_map[iu, ju]
-        mask = (dists > 0) & (dists <= edge_threshold)
-        d_selected = dists[mask]
-        if d_selected.size > 0:
-            all_dists.append(d_selected)
-
-    if not all_dists:
-        return np.array([], dtype=float)
-
-    all_dists = np.concatenate(all_dists)
-
-    return all_dists
-
-
-def build_dynamic_distance_classes(
-    all_dists: np.ndarray,
-    n_bins: int,
-    edge_threshold: float,
-) -> Dict[str, Dict[str, float]]:
-    """
-    Build dynamic distance classes using quantile-based binning.
-
-    - all_dists: 1D array of distances (already filtered by threshold).
-    - n_bins: desired number of bins.
-    - edge_threshold: upper cutoff (used as fallback / sanity).
-
-    Returns:
-        {
-            "bin_1": {"low": low_1, "high": high_1},
-            "bin_2": {"low": low_2, "high": high_2},
-            ...
-        }
-
-    Bins are [low, high] or [low, high) depending on how your find_class works;
-    adjust there if needed.
-    """
-    if all_dists.size == 0:
-        return {}
-
-    # Quantile-based edges -> roughly equal number of pairs per bin
-    quantiles = np.linspace(0.0, 1.0, n_bins + 1)
-    raw_edges = np.quantile(all_dists, quantiles)
-
-    # Ensure strictly increasing edges (collapse near-duplicates)
-    bin_edges = [float(raw_edges[0])]
-    for e in raw_edges[1:]:
-        e = float(e)
-        if e - bin_edges[-1] > 1e-6:
-            bin_edges.append(e)
-
-    # If everything collapsed to one value, make a single bin [0, edge_threshold]
-    if len(bin_edges) == 1:
-        bin_edges = [0.0, float(edge_threshold)]
-
-    # Clamp max edge to edge_threshold (so we never exceed what triads use)
-    if bin_edges[-1] > edge_threshold:
-        bin_edges[-1] = float(edge_threshold)
-
-    classes = {}
-    for i in range(len(bin_edges) - 1):
-        low = float(bin_edges[i])
-        high = float(bin_edges[i + 1])
-        # Skip zero-width bins just in case
-        if high <= low:
-            continue
-        class_name = f"bin_{i+1}"
-        classes[class_name] = {"low": low, "high": high}
-
-    return classes
-
-
-def plot_distance_distribution(
-    all_dists: np.ndarray,
-    classes: Dict[str, Dict[str, float]],
-    output_path: str,
-    filename: str = "distance_distribution.png",
-):
-    """
-    Save a histogram of all distances and draw vertical lines at bin boundaries.
-    """
-    if all_dists.size == 0:
-        return
-
-    os.makedirs(output_path, exist_ok=True)
-    out_file = os.path.join(output_path, filename)
-
-    plt.figure()
-    plt.hist(all_dists, bins=50, density=False, alpha=0.7)
-    # Draw bin edges
-    edges = sorted(
-        {c["low"] for c in classes.values()} |
-        {c["high"] for c in classes.values()}
-    )
-    for e in edges:
-        plt.axvline(e, linestyle="--", alpha=0.5)
-
-    plt.xlabel("Distance")
-    plt.ylabel("Count")
-    plt.title("Distance distribution with dynamic bins")
-    plt.tight_layout()
-    plt.savefig(out_file, dpi=150)
-    plt.close()
-
 def find_triads(graph_data, classes, config, checks):
     G = graph_data["graph"]
     depth = graph_data["residue_depth"]
@@ -665,14 +472,6 @@ def find_triads(graph_data, classes, config, checks):
     for center in G.nodes():
         neighbors = {n for n in G.neighbors(center) if n != center}
         for u, w in combinations(neighbors, 2):
-            chains = config.get("filter_triads_by_chain", None)
-            if isinstance(chains, list) and len(chains) > 0:
-                u_chain = u.split(":")[0]
-                center_chain = center.split(":")[0]
-                w_chain = w.split(":")[0]
-                if u_chain not in chains and center_chain not in chains and w_chain not in chains:
-                    continue
-
             if u[:5] == w[:5]:
                 _u_index, _center_index, _w_index = residue_map[residue_to_tuple(u)], residue_map[residue_to_tuple(center)], residue_map[residue_to_tuple((w))]
                 _du = contact_map[_u_index, _center_index]
@@ -753,40 +552,12 @@ def find_triads(graph_data, classes, config, checks):
             else:
                 rsa1_class, rsa2_class, rsa3_class = 0, 0, 0
                                             
-            dynamic_dist = config.get("dynamic_distance_classes", False)
-
-            if distance_classes is not None and dynamic_dist:
-                d1_opts = _as_list(
-                    dynamic_distance_to_classes(
-                        distance_classes,
-                        d1,
-                        diff_threshold=config["distance_diff_threshold"],
-                        close_tolerance=config["close_tolerance"],
-                    )
-                )
-                d2_opts = _as_list(
-                    dynamic_distance_to_classes(
-                        distance_classes,
-                        d2,
-                        diff_threshold=2 * config["distance_diff_threshold"],  # if you want a different rule for d2
-                        close_tolerance=config["close_tolerance"],
-                    )
-                )
-                d3_opts = _as_list(
-                    dynamic_distance_to_classes(
-                        distance_classes,
-                        d3,
-                        diff_threshold=config["distance_diff_threshold"],
-                        close_tolerance=config["close_tolerance"],
-                    )
-                )
-            elif distance_classes is not None:
-                # old static-classes behavior, if you already have some find_class()
+            if distance_classes is not None:
                 d1_opts = _as_list(find_class(distance_classes, d1))
                 d2_opts = _as_list(find_class(distance_classes, d2))
                 d3_opts = _as_list(find_class(distance_classes, d3))
             else:
-                # fallback to fixed-width value_to_class
+
                 d1_opts = _as_list(
                     value_to_class(
                         d1,
@@ -795,6 +566,7 @@ def find_triads(graph_data, classes, config, checks):
                         close_tolerance=config["close_tolerance"],
                     )
                 )
+
                 d2_opts = _as_list(
                     value_to_class(
                         d2,
@@ -803,6 +575,7 @@ def find_triads(graph_data, classes, config, checks):
                         close_tolerance=config["close_tolerance"],
                     )
                 )
+
                 d3_opts = _as_list(
                     value_to_class(
                         d3,
@@ -811,7 +584,7 @@ def find_triads(graph_data, classes, config, checks):
                         close_tolerance=config["close_tolerance"],
                     )
                 )
-
+          
             # Checagem dos descritores que NÃO são distância (não viram lista)
             # print(config["edge_threshold"],d1_opts, d1, d2_opts, d2, d3_opts, d3)
             prefix = (depth1_class, depth2_class, depth3_class, rsa1_class, rsa2_class, rsa3_class)
@@ -831,6 +604,8 @@ def find_triads(graph_data, classes, config, checks):
                         triad_full = (*triad_abs, *full_describer)
                         triad_absolute = (*triad_abs, *full_describer_absolute)
                         if triad_token not in triads:
+                            print(triad_token, triad_full)
+
                             triads[triad_token] = {
                                 "count": 1,
                                 "triads_full": [triad_full],
@@ -1564,27 +1339,6 @@ def create_std_matrix(nodes, matrices: dict, maps: dict, threshold: float = 3.0)
 
 #     ...
 
-
-def get_memory_usage_mb():
-    """
-    Retorna uso de memória RSS em MB, se psutil estiver disponível.
-    Caso contrário, retorna None.
-    """
-    try:
-        import psutil
-    except ImportError:
-        return None
-
-    process = psutil.Process(os.getpid())
-    return process.memory_info().rss / (1024 ** 2)
-
-def write_json_raw(path, data):
-    """
-    Salva dados em JSON bruto, indentado.
-    """
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
-        
 def execute_step(
     step_idx: int,
     graph_collection,
@@ -1593,10 +1347,6 @@ def execute_step(
     graph_data,
     global_state,
 ):
-
-    profiling = global_state.get("profiling", None)
-    debug = bool(profiling and profiling.get("debug", False))
-
     if step_idx == 1:
         source = graph_collection["triads"]
     else:
@@ -1610,31 +1360,7 @@ def execute_step(
     new_filtered_cross_combos = []
     all_step_graphs = []
 
-    if debug:
-        step_profile = {
-            "step": step_idx,
-            "num_items": num_items,
-            "num_chunks": len(chunks),
-            "chunks": [],       # lista de dicts, um por chunk
-            "time_sec": None,   # preenchido no final
-            "mem_before_mb": None,
-            "mem_after_mb": None,
-        }
-        step_mem_before = get_memory_usage_mb()
-        step_time_start = time.perf_counter()
-        print(f"[DEBUG] Step {step_idx} started. Memory: {step_mem_before:.2f} MB")
-
-    else:
-        step_profile = None
-
     for chunk_idx, chunk_triads in enumerate(chunks):
-        if debug:
-            chunk_time_start = time.perf_counter()
-            chunk_mem_before = get_memory_usage_mb()
-            print(f"[DEBUG]   Chunk {chunk_idx}: started. "
-                  f"Memory before: {chunk_mem_before:.2f} MB. "
-                  f"Chunk size: {len(chunk_triads)}")
-
         rebuilt_combos, final_graphs = process_chunk(
             step_idx=step_idx,
             chunk_idx=chunk_idx,
@@ -1649,39 +1375,6 @@ def execute_step(
             new_filtered_cross_combos.append(rebuilt_combos)
 
         all_step_graphs.extend(final_graphs)
-
-        if debug:
-            chunk_time_end = time.perf_counter()
-            chunk_mem_after = get_memory_usage_mb()
-
-            print(f"[DEBUG]   Chunk {chunk_idx}: finished. "
-                  f"Time: {chunk_time_end - chunk_time_start:.3f}s. "
-                  f"Memory after: {chunk_mem_after:.2f} MB.")
-
-            chunk_profile = {
-                "chunk_idx": chunk_idx,
-                "num_triads_in_chunk": len(chunk_triads),
-                "time_sec": chunk_time_end - chunk_time_start,
-                "mem_before_mb": chunk_mem_before,
-                "mem_after_mb": chunk_mem_after,
-            }
-            step_profile["chunks"].append(chunk_profile)
-
-
-    if debug:
-        step_time_end = time.perf_counter()
-        step_mem_after = get_memory_usage_mb()
-
-
-        print(f"[DEBUG] Step {step_idx} finished. "
-              f"Total time: {step_time_end - step_time_start:.3f}s. "
-              f"Final memory: {step_mem_after:.2f} MB\n")
-
-        step_profile["time_sec"] = step_time_end - step_time_start
-        step_profile["mem_before_mb"] = step_mem_before
-        step_profile["mem_after_mb"] = step_mem_after
-
-        profiling["steps"].append(step_profile)
 
     return new_filtered_cross_combos, all_step_graphs
 
@@ -1700,15 +1393,14 @@ def process_chunk(step_idx, chunk_idx, chunk_triads, graph_data, global_state):
         log.debug(f"[step {step_idx}] Creating combos | Chunk: {chunk_idx}")
         cross_combos = cross_protein_triads(chunk_triads, config["distance_diff_threshold"])
         log.info(f"[step {step_idx}] Created {len(cross_combos)}")
-        filtered_combos = cross_combos["full"]
-        # filtered_combos = filter_cross_combos(
-        #     cross_combos,
-        #     graph_data,
-        #     distance_std_threshold=config["distance_std_threshold"],
-        #     roles_to_check=("UC","CW", "UW"),
-        #     offset=chunk_idx * max_chunks,
-        # )
-        # log.info(f"[step {step_idx}] Filtered {len(cross_combos['full'])-len(filtered_combos)} | {len(cross_combos['full'])} | {len(filtered_combos)}")
+        filtered_combos = filter_cross_combos(
+            cross_combos,
+            graph_data,
+            distance_std_threshold=config["distance_std_threshold"],
+            roles_to_check=("UC","CW", "UW"),
+            offset=chunk_idx * max_chunks,
+        )
+        log.info(f"[step {step_idx}] Filtered {-len(filtered_combos)+len(cross_combos)}")
     else:
         log.debug(f"[step {step_idx}] Creating combos (no distances) | Chunk: {chunk_idx}")
         cross_combos = cross_protein_triads(chunk_triads, config["distance_diff_threshold"], check_distances=False)
@@ -1817,19 +1509,15 @@ def process_chunk(step_idx, chunk_idx, chunk_triads, graph_data, global_state):
 
         if not debugar_:
             tracer.enabled = False
-        
-        end = True if step_idx == steps else False
+
         frames, union_graph, error = generate_frames(
-            component_graph=subG,
             matrices=matrices_mul,
             maps=maps_mul,
             len_component=len_component,
             chunk_id=chunk_idx,
             step=step_idx,
             debug=debugar_,
-            tracer=tracer,
-            nodes=nodes,
-            end=end
+            tracer=tracer
         )
 
         if len(frames.keys()) > 1:
@@ -1860,47 +1548,10 @@ def association_product(graph_data: list,
                         config: dict,
                         debug: bool = True) -> Union[Dict[str, List], None]:
     logger = logging.getLogger("association.association_product")
-
-    profiling = {
-        "debug": debug,
-        "steps": [] 
-    }
+    
     checks = config.get("checks", {"rsa": True, "depth": True})
     classes = config.get("classes", {})
     max_chunks = config.get("max_chunks", 5)
-
-    dynamic_dist = config.get("dynamic_distance_classes", False)
-    distance_bins = config.get("distance_bins", 5)
-    edge_threshold = config.get("edge_threshold", 10.0)
-    output_path = config.get("output_path", "./outputs")
-
-    # If dynamic distance classes are enabled, build them BEFORE triads
-    if dynamic_dist:
-        logger.info("Building dynamic distance classes from all contact maps...")
-        all_dists = collect_all_distances(graph_data, edge_threshold=edge_threshold)
-        if all_dists.size == 0:
-            logger.warning("No distances found for dynamic binning; falling back to standard binning.")
-        else:
-            distance_classes = build_dynamic_distance_classes(
-                all_dists=all_dists,
-                n_bins=distance_bins,
-                edge_threshold=edge_threshold,
-            )
-            if distance_classes:
-                # Attach to classes so find_triads can use it via classes["distance"]
-                classes["distance"] = distance_classes
-                config["classes"] = classes  # keep config in sync
-                logger.info(f"Dynamic distance classes created: {len(distance_classes)} bins.")
-                # Optional: plot distribution
-                plot_distance_distribution(
-                    all_dists=all_dists,
-                    classes=distance_classes,
-                    output_path=output_path,
-                    filename="distance_distribution.png",
-                )
-                logger.info(f"Distance distribution plot saved to {output_path}/distance_distribution.png")
-            else:
-                logger.warning("Dynamic distance classes ended up empty; this should not happen.")
 
     depths = []
     if checks["depth"]:
@@ -2023,7 +1674,6 @@ def association_product(graph_data: list,
                 "matrices_dict": matrices_dict,
                 "config": config,
                 "steps": steps,
-                "profiling": profiling
             }
         )
 
@@ -2033,9 +1683,6 @@ def association_product(graph_data: list,
     log.debug("Finished creating ALL Frames")
     save("association_product", "Graphs", final_graphs)
 
-    if debug:
-        write_json_raw("profiling_report.json", profiling)
-        print("[DEBUG] Profiling report saved to association_product/profiling_report.json")
 
     return {
         "AssociatedGraph": final_graphs
@@ -2210,7 +1857,7 @@ def association_product(graph_data: list,
     return {
             "AssociatedGraph": Graphs
         }
-def generate_frames(component_graph, matrices, maps, len_component, chunk_id, step, debug=False, debug_every=5000, tracer: TraversalTracer=None, nodes=None, end=False):
+def generate_frames(matrices, maps, len_component, chunk_id, step, debug=False, debug_every=5000, tracer: TraversalTracer=None):
     """
     Build frames by branching on coherent groups of the frontier.
 
@@ -2235,31 +1882,15 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
 
     N_adj = [np.nonzero(A[u])[0] for u in range(K)]  # Vizinhos por adjacência
 
-    if nodes is None:
-        nodes = list(component_graph.nodes())
-
-    if len(nodes) != K:
-        raise ValueError(
-            f"Mismatch between nodes ({len(nodes)}) and matrices size ({K}). "
-            "Check node ordering passed to create_std_matrix vs generate_frames."
-        )
-
-    node_to_idx = {node: idx for idx, node in enumerate(nodes)}
-
-    N_adj = [np.nonzero(A[u])[0] for u in range(K)]
-
     frames = {}
 
-    edges_base = set()
-    for u, v in component_graph.edges():
-        iu = node_to_idx[u]
-        iv = node_to_idx[v]
-        if iu == iv:
-            continue
-        edges_base.add(frozenset((iu, iv)))
-
+    # frame 0 base vetorizado
+    ii, jj = np.where(A)
+    m = ii < jj
+    edges_base = {frozenset((int(i), int(j))) for i, j in zip(ii[m], jj[m])}
     _, edges_idx_0, edges_res_0 = convert_edges_to_residues(edges_base, maps)
     frames[0] = {"edges_indices": edges_idx_0, "edges_residues": edges_res_0}
+
 
     def frontier_for(chosen: np.ndarray, inter_mask: np.ndarray) -> tuple:
         """
@@ -2689,10 +2320,7 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
     #     kept_edge_sets.append(es)
     #     fid_out += 1
 
-    if end:
-        final_frames = filter_subframes(frames, debug=debug)
-    else:
-        final_frames = frames
+    final_frames = filter_subframes(frames, debug=True)
 
     # log.debug(f"[done] frames_out={len(final_frames)} "
                 # f"(accepted_raw={len(others)}, kept_maximal={len(final_frames)-1})")

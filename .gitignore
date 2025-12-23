@@ -1,9 +1,12 @@
+__pycache__/
 *.out
 *.pyc
 *.pdb
 *.png
+*.mp4
+*.gif
 *.zip
-__pycache__/
+*.cif
 Analysis/*
 Analysis/
 Analysis/**/*

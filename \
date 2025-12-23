@@ -10,7 +10,6 @@ import networkx as nx
 import time
 # from graphein.protein.edges.distance import compute_distmat
 from os import path
-import os
 import pandas as pd
 from collections import Counter
 from typing import Any, FrozenSet, Tuple, List, Optional, Union, Dict, Set, Iterable, Sequence
@@ -142,6 +141,23 @@ def convert_edges_to_residues(edges: Set[FrozenSet], maps: Dict) -> Tuple[List, 
 
     return original_edges, edges_indices, converted_edges
     
+def check_multiple_chains(node: Tuple, residue_maps_unique: Dict):
+    """Check if at least on node is from different chain
+
+    Args:
+        node (tuple): Tuple of residues that together makes a node
+        residue_maps_unique (Dict): A dictionary of all residues
+
+    Returns:
+        boolean: Return true if there's a different chain in node
+    """
+    
+    chains = set([residue_maps_unique[node_indice][0] for node_indice in node])
+    if len(chains) > 1:
+        return False
+    else:
+        return True
+
 def filter_maps_by_nodes(data: dict, 
                         matrices_dict: dict,
                         distance_threshold: float = 10.0, 
@@ -222,180 +238,163 @@ def indices_graphs(nodes_lists: List[List]) -> List[Tuple[int, int]]:
         ranges.append((current, current + length))
         current += length
     return ranges
+    
+def create_similarity_matrix(nodes_graphs: list,
+                             metadata: dict,
+                             residues_factors,
+                             similarity_cutoff: float = 0.95,
+                             mode="dictionary"):
+
+    total_length = metadata["total_length"]
+    ranges_graph = metadata["ranges_graph"]
+    
+    matrix = np.zeros((total_length, total_length))
+    
+    for i in range(len(nodes_graphs)):
+        for j in range(i + 1, len(nodes_graphs)):
+            residuesA = residues_factors[i]
+            residuesB = residues_factors[j]
+            
+            if mode == "dictionary":
+                keysA = sorted(residuesA.keys())
+                keysB = sorted(residuesB.keys())
+
+                A = np.array([residuesA[k] for k in keysA])
+                B = np.array([residuesB[k] for k in keysB])
+
+                similarities = cosine_similarity(A, B)
+
+            elif mode == "1d":
+                # def normalize(arr):
+                #     return (arr - np.min(arr)) / (np.max(arr) - np.min(arr))
+
+                residuesA = residuesA.reshape(-1, 1)
+                residuesB = residuesB.reshape(1, -1)
+
+                similarities = 1 - np.abs(residuesA - residuesB)
+            else:
+                return None
+            startA, endA = ranges_graph[i]
+            startB, endB = ranges_graph[j]
+
+            matrix[startA:endA, startB:endB] = similarities
+            matrix[startB:endB, startA:endA] = similarities.T
+    
+    matrix[matrix < similarity_cutoff] = 0
+    matrix[matrix >= similarity_cutoff] = 1
+    
+    return matrix
+
 
 def value_to_class(
     value: float,
-    bin_width: float,        # Fixed size of each division
+    n_divisions: int,
     threshold: float,
     inverse: bool = False,
     upper_bound: float = 100.0,
-    close_tolerance: float = 0.1,  # Absolute tolerance in 'value' units
+    center_tolerance: float = 0.1,  # tolerância ABSOLUTA, em unidades de 'value',
+    distances = []
 ) -> Optional[Union[int, List[int]]]:
     """
-    Non-inverse:
-      - Domain: (0, threshold]
-      - Bins: (L, R] spaced by bin_width. Last bin may be smaller than bin_width.
-      - Uncertainty: half of the bin_width.
-      - If |value - center_of_bin| <= close_tolerance, returns [class_index].
-      - Otherwise, returns all classes whose bins intersect with [value - unc, value + inc].
+    Não-inverse:
+      - Domínio: (0, threshold]
+      - Bins: (L, R] igualmente espaçados, i = 1..n_divisions, R = i*(threshold/n_divisions)
+      - Incerteza: metade do tamanho do bin (len_bin/2)
+      - Se |value - centro_da_bin(value)| <= center_tolerance, retorna só [classe_do_value].
+      - Caso contrário, retorna todas as classes cujos bins interceptam [value - inc, value + inc].
 
     Inverse:
-      - Domain: [threshold, upper_bound]
-      - Maps to a single class index based on bin_width.
+      - Igual ao comportamento anterior: mapeia para uma única classe.
     """
-    if bin_width <= 0:
-        return None
-
     if not inverse:
-        # Out of bounds check
-        if value <= 0 or value > threshold:
+        if value <= 0 or value > threshold or n_divisions <= 0:
             return None
 
-        # Calculate total number of divisions
-        n_divisions = math.ceil(threshold / bin_width)
-        
-        # Identify the primary bin index (1-based)
-        i = math.ceil(value / bin_width)
-        i = max(1, min(i, n_divisions))
+        length_division = threshold / n_divisions
+        if length_division <= 0:
+            return None
 
-        # Calculate the actual boundaries of the current bin 
-        # (important if the last bin is smaller than bin_width)
-        current_bin_left = (i - 1) * bin_width
-        current_bin_right = min(i * bin_width, threshold)
-        current_bin_actual_width = current_bin_right - current_bin_left
-        
-        bin_center = current_bin_left + (current_bin_actual_width / 2.0)
-        
-        # Clamp tolerance so it doesn't exceed half of the actual bin width
-        tol = max(0.0, float(close_tolerance))
-        tol = min(tol, (current_bin_actual_width / 2.0) - 1e-12)
+        i = math.ceil(value / length_division)
+        if i < 1:
+            i = 1
+        if i > n_divisions:
+            i = n_divisions
 
-        # Return single class if within center tolerance
+        # Tolerância absoluta para travar no centro
+        tol = max(0.0, float(center_tolerance))
+
+        tol = min(tol, (length_division / 2.0) - 1e-12)
+
+        bin_center = (i - 0.5) * length_division
         if abs(value - bin_center) <= tol:
             return [i]
 
-        # Outside center: apply standard uncertainty (half of standard bin_width)
-        inc = bin_width / 2.0
+        # Fora da zona central: aplica a incerteza padrão (metade da bin)
+        inc = length_division / 2.0
         low = value - inc
         high = value + inc
 
         classes: List[int] = []
         for j in range(1, n_divisions + 1):
-            L = (j - 1) * bin_width
-            R = min(j * bin_width, threshold) # Ensure we don't exceed threshold
-            
-            # Check intersection between [low, high] and (L, R]
+            L = (j - 1) * length_division
+            R = j * length_division
+            # interseção entre [low, high] e (L, R]
             if (low < R) and (high > L):
-                classes.append(j)
+                if R <= threshold and high > 0:
+                    classes.append(j)
 
         return classes if classes else None
 
+    # --- inverse inalterado (retorna UMA classe) ---
     else:
-        # Inverse logic: mapping values from threshold up to upper_bound
-        if value < threshold or value > upper_bound:
+        if value < threshold or n_divisions <= 0:
             return None
-            
         span = upper_bound - threshold
         if span <= 0:
             return None
-            
-        rel_value = value - threshold
-        class_name = math.ceil(rel_value / bin_width)
-        
-        # Clamp to the maximum number of bins possible in the span
-        max_inv_bins = math.ceil(span / bin_width)
-        return max(1, min(class_name, max_inv_bins))
-    
-def dynamic_distance_to_classes(
-    distance_classes: Dict[str, Dict[str, float]],
-    value: float,
-    diff_threshold: float,
-    close_tolerance: float,
-) -> Optional[Union[str, List[str]]]:
-    """
-    distance_classes: { class_name: {"low": float, "high": float}, ... }
-    value: distance value (d1, d2, d3, ...)
-    diff_threshold: distance_diff_threshold (max allowed distance diff between triads)
-    close_tolerance: tolerance to say "this value is clearly in this bin"
+        rel = value - threshold
+        length_division = span / n_divisions
+        class_name = math.ceil(rel / length_division)
+        if class_name < 1:
+            class_name = 1
+        if class_name > n_divisions:
+            class_name = n_divisions
+        return class_name
 
-    Returns:
-        - None  -> no valid bin
-        - "bin_k" or ["bin_k"]  -> single bin
-        - ["bin_i", "bin_j", ...] -> multiple bins (near boundary)
-    """
-    # Filter only bins that could reasonably contain value
-    candidate_bins = []
-    for name, interval in distance_classes.items():
-        low = interval["low"]
-        high = interval["high"]
-        if low <= value <= high:
-            center = 0.5 * (low + high)
-            candidate_bins.append((name, low, high, center))
+# def value_to_class(value, n_divisions, threshold, inverse=False, upper_bound = 100):
 
-    if not candidate_bins:
-        # Value is outside all dynamic bins
-        return None
-
-    # Choose primary bin: the one whose center is closest to value
-    primary = min(candidate_bins, key=lambda x: abs(value - x[3]))
-    primary_name, primary_low, primary_high, primary_center = primary
-
-    # If clearly inside this bin (center region), return only this one
-    if abs(value - primary_center) <= close_tolerance:
-        return [primary_name]
-
-    # Otherwise, build an uncertainty interval based on diff_threshold
-    low_unc = value - diff_threshold
-    high_unc = value + diff_threshold
-
-    # Collect all bins that intersect [low_unc, high_unc]
-    hits: List[str] = []
-    for name, interval in distance_classes.items():
-        low = interval["low"]
-        high = interval["high"]
-        # intersection check between [low_unc, high_unc] and [low, high]
-        if (low_unc <= high) and (high_unc >= low):
-            hits.append(name)
-
-    if not hits:
-        return None
-
-    return hits if len(hits) > 1 else hits[0]
-
-def create_classes_bin(total_length: float, bin_width: float): 
-    """Creates a dictionary of bins with their respective ranges."""
-    n_bins = math.ceil(total_length / bin_width)
-    return {
-        str(n + 1): (n * bin_width, min((n + 1) * bin_width, total_length))
-        for n in range(n_bins)
-    }
- 
-# def find_class(dictionary, value):
-#     for key in dictionary.keys():
-#         range_tuple = dictionary[key]
-#         if range_tuple[0] < value <= range_tuple[1]:
-#             return key
+#     if not inverse:
+#         if value <= 0 or value > threshold:
+#             return None
+#         span = threshold
+#         rel = value
 #     else:
-#         return None
+#         if value < threshold:
+#             return None
 
-def find_class(classes: Dict[str, Dict[str, float]], value: float):
-    """
-    Return all class names whose interval contains value.
-    Assumes structure:
-        classes = { "bin_1": {"low": ..., "high": ...}, ... }
-    """
-    hits = []
-    for name, interval in classes.items():
-        low = interval["low"]
-        high = interval["high"]
-        # choose your convention: [low, high] or [low, high)
-        if low <= value <= high:
-            hits.append(name)
-    if not hits:
+#         span = upper_bound - threshold
+#         rel = value - threshold
+
+#     length_division = span / n_divisions
+#     class_name = math.ceil(rel / length_division) 
+     
+#     return class_name
+
+def create_classes_bin(lenght, n_bins): 
+    length_division = lenght / n_bins
+
+    return  {
+            str(n): ((n-1)*length_division, n*length_division)
+            for n in range(n_bins)
+        }
+ 
+def find_class(dictionary, value):
+    for key in dictionary.keys():
+        range_tuple = dictionary[key]
+        if range_tuple[0] < value <= range_tuple[1]:
+            return key
+    else:
         return None
-    # Return single class or list depending on your current semantics
-    return hits[0] if len(hits) == 1 else hits
-
 
 def residue_to_tuple(res):
     res_split = res.split(":")
@@ -521,123 +520,6 @@ def triad_chirality_with_cb(
     }
 
 
-def collect_all_distances(graph_data, edge_threshold: float) -> np.ndarray:
-    """
-    Collect all pairwise distances from contact maps of all proteins,
-    restricted to 0 < d <= edge_threshold, using upper triangle only.
-    """
-    all_dists = []
-
-    for gd in graph_data:
-        contact_map = gd["contact_map"]
-        contact_map = np.asarray(contact_map)
-        if contact_map.ndim != 2 or contact_map.shape[0] != contact_map.shape[1]:
-            continue  # skip garbage
-
-        iu, ju = np.triu_indices_from(contact_map, k=1)
-        dists = contact_map[iu, ju]
-        mask = (dists > 0) & (dists <= edge_threshold)
-        d_selected = dists[mask]
-        if d_selected.size > 0:
-            all_dists.append(d_selected)
-
-    if not all_dists:
-        return np.array([], dtype=float)
-
-    all_dists = np.concatenate(all_dists)
-
-    return all_dists
-
-
-def build_dynamic_distance_classes(
-    all_dists: np.ndarray,
-    n_bins: int,
-    edge_threshold: float,
-) -> Dict[str, Dict[str, float]]:
-    """
-    Build dynamic distance classes using quantile-based binning.
-
-    - all_dists: 1D array of distances (already filtered by threshold).
-    - n_bins: desired number of bins.
-    - edge_threshold: upper cutoff (used as fallback / sanity).
-
-    Returns:
-        {
-            "bin_1": {"low": low_1, "high": high_1},
-            "bin_2": {"low": low_2, "high": high_2},
-            ...
-        }
-
-    Bins are [low, high] or [low, high) depending on how your find_class works;
-    adjust there if needed.
-    """
-    if all_dists.size == 0:
-        return {}
-
-    # Quantile-based edges -> roughly equal number of pairs per bin
-    quantiles = np.linspace(0.0, 1.0, n_bins + 1)
-    raw_edges = np.quantile(all_dists, quantiles)
-
-    # Ensure strictly increasing edges (collapse near-duplicates)
-    bin_edges = [float(raw_edges[0])]
-    for e in raw_edges[1:]:
-        e = float(e)
-        if e - bin_edges[-1] > 1e-6:
-            bin_edges.append(e)
-
-    # If everything collapsed to one value, make a single bin [0, edge_threshold]
-    if len(bin_edges) == 1:
-        bin_edges = [0.0, float(edge_threshold)]
-
-    # Clamp max edge to edge_threshold (so we never exceed what triads use)
-    if bin_edges[-1] > edge_threshold:
-        bin_edges[-1] = float(edge_threshold)
-
-    classes = {}
-    for i in range(len(bin_edges) - 1):
-        low = float(bin_edges[i])
-        high = float(bin_edges[i + 1])
-        # Skip zero-width bins just in case
-        if high <= low:
-            continue
-        class_name = f"bin_{i+1}"
-        classes[class_name] = {"low": low, "high": high}
-
-    return classes
-
-
-def plot_distance_distribution(
-    all_dists: np.ndarray,
-    classes: Dict[str, Dict[str, float]],
-    output_path: str,
-    filename: str = "distance_distribution.png",
-):
-    """
-    Save a histogram of all distances and draw vertical lines at bin boundaries.
-    """
-    if all_dists.size == 0:
-        return
-
-    os.makedirs(output_path, exist_ok=True)
-    out_file = os.path.join(output_path, filename)
-
-    plt.figure()
-    plt.hist(all_dists, bins=50, density=False, alpha=0.7)
-    # Draw bin edges
-    edges = sorted(
-        {c["low"] for c in classes.values()} |
-        {c["high"] for c in classes.values()}
-    )
-    for e in edges:
-        plt.axvline(e, linestyle="--", alpha=0.5)
-
-    plt.xlabel("Distance")
-    plt.ylabel("Count")
-    plt.title("Distance distribution with dynamic bins")
-    plt.tight_layout()
-    plt.savefig(out_file, dpi=150)
-    plt.close()
-
 def find_triads(graph_data, classes, config, checks):
     G = graph_data["graph"]
     depth = graph_data["residue_depth"]
@@ -662,17 +544,10 @@ def find_triads(graph_data, classes, config, checks):
 
     n_nodes = len(G.nodes())
     n_edges = len(G.edges())
+    
     for center in G.nodes():
         neighbors = {n for n in G.neighbors(center) if n != center}
         for u, w in combinations(neighbors, 2):
-            chains = config.get("filter_triads_by_chain", None)
-            if isinstance(chains, list) and len(chains) > 0:
-                u_chain = u.split(":")[0]
-                center_chain = center.split(":")[0]
-                w_chain = w.split(":")[0]
-                if u_chain not in chains and center_chain not in chains and w_chain not in chains:
-                    continue
-
             if u[:5] == w[:5]:
                 _u_index, _center_index, _w_index = residue_map[residue_to_tuple(u)], residue_map[residue_to_tuple(center)], residue_map[residue_to_tuple((w))]
                 _du = contact_map[_u_index, _center_index]
@@ -684,7 +559,6 @@ def find_triads(graph_data, classes, config, checks):
                     outer_sorted = tuple([w, u])
             else:
                 outer_sorted = tuple(sorted([u, w]))
-
             u_split, center_split, w_split = outer_sorted[0].split(":"), center.split(":"), outer_sorted[1].split(":")
             u_res, center_res, w_res = u_split[1], center_split[1], w_split[1]
             u_tuple, center_tuple, w_tuple = residue_to_tuple(outer_sorted[0]), residue_to_tuple(center), residue_to_tuple(outer_sorted[1])
@@ -704,12 +578,12 @@ def find_triads(graph_data, classes, config, checks):
             d2 = contact_map[u_index, w_index]
             d3 = contact_map[center_index, w_index]
 
-            u_ca = np.array(G.nodes[outer_sorted[0]].get("ca_coord", (np.nan, np.nan, np.nan)))
-            w_ca = np.array(G.nodes[outer_sorted[1]].get("ca_coord", (np.nan, np.nan, np.nan)))
+            u_ca = np.array(G.nodes[u].get("ca_coord", (np.nan, np.nan, np.nan)))
+            w_ca = np.array(G.nodes[w].get("ca_coord", (np.nan, np.nan, np.nan)))
             center_ca = np.array(G.nodes[center].get("ca_coord", (np.nan, np.nan, np.nan)))
 
-            u_cb = np.array(G.nodes[outer_sorted[0]].get("cb_coord", (np.nan, np.nan, np.nan)))
-            w_cb = np.array(G.nodes[outer_sorted[1]].get("cb_coord", (np.nan, np.nan, np.nan)))
+            u_cb = np.array(G.nodes[u].get("cb_coord", (np.nan, np.nan, np.nan)))
+            w_cb = np.array(G.nodes[w].get("cb_coord", (np.nan, np.nan, np.nan)))
             center_cb = np.array(G.nodes[center].get("cb_coord", (np.nan, np.nan, np.nan)))
 
 
@@ -717,10 +591,13 @@ def find_triads(graph_data, classes, config, checks):
                 chi = triad_chirality_with_cb(u_ca, center_ca, w_ca, u_cb, center_cb, w_cb, majority_only=True)["chi"]
             else:
                 chi = 0
-                print(f"Nan: {u_cb, center_cb, w_cb}")
-                print(u, center, w)
-                input()
-             
+
+            print(u, center, w)
+            print(u_ca, center_ca, w_ca)
+            print(u_cb, center_cb, w_cb)
+            print(chi)
+
+
             rsa1 = rsa[outer_sorted[0]]*100
             rsa2 = rsa[center]*100
             rsa3 = rsa[outer_sorted[1]]*100
@@ -752,68 +629,27 @@ def find_triads(graph_data, classes, config, checks):
                     rsa3_class = value_to_class(rsa3, config["rsa_bins"], config["rsa_filter"]*100, inverse=True)
             else:
                 rsa1_class, rsa2_class, rsa3_class = 0, 0, 0
-                                            
-            dynamic_dist = config.get("dynamic_distance_classes", False)
-
-            if distance_classes is not None and dynamic_dist:
-                d1_opts = _as_list(
-                    dynamic_distance_to_classes(
-                        distance_classes,
-                        d1,
-                        diff_threshold=config["distance_diff_threshold"],
-                        close_tolerance=config["close_tolerance"],
-                    )
-                )
-                d2_opts = _as_list(
-                    dynamic_distance_to_classes(
-                        distance_classes,
-                        d2,
-                        diff_threshold=2 * config["distance_diff_threshold"],  # if you want a different rule for d2
-                        close_tolerance=config["close_tolerance"],
-                    )
-                )
-                d3_opts = _as_list(
-                    dynamic_distance_to_classes(
-                        distance_classes,
-                        d3,
-                        diff_threshold=config["distance_diff_threshold"],
-                        close_tolerance=config["close_tolerance"],
-                    )
-                )
-            elif distance_classes is not None:
-                # old static-classes behavior, if you already have some find_class()
+                
+            # if distance_classes is not None:
+            #     d1_class = find_class(distance_classes, d1) 
+            #     d2_class = find_class(distance_classes, d2)
+            #     d3_class = find_class(distance_classes, d3)
+            # else:
+            #     d1_class = value_to_class(d1, config["distance_bins"], config["centroid_threshold"])
+            #     d2_class = value_to_class(d2, 2*config["distance_bins"], 2*config["centroid_threshold"])
+            #     d3_class = value_to_class(d3, config["distance_bins"], config["centroid_threshold"] )
+                            
+            if distance_classes is not None:
                 d1_opts = _as_list(find_class(distance_classes, d1))
                 d2_opts = _as_list(find_class(distance_classes, d2))
                 d3_opts = _as_list(find_class(distance_classes, d3))
             else:
-                # fallback to fixed-width value_to_class
-                d1_opts = _as_list(
-                    value_to_class(
-                        d1,
-                        config["distance_bin_width"],
-                        config["edge_threshold"],
-                        close_tolerance=config["close_tolerance"],
-                    )
-                )
-                d2_opts = _as_list(
-                    value_to_class(
-                        d2,
-                        2 * config["distance_bin_width"],
-                        2 * config["edge_threshold"],
-                        close_tolerance=config["close_tolerance"],
-                    )
-                )
-                d3_opts = _as_list(
-                    value_to_class(
-                        d3,
-                        config["distance_bin_width"],
-                        config["edge_threshold"],
-                        close_tolerance=config["close_tolerance"],
-                    )
-                )
+                d1_opts = _as_list(value_to_class(d1, config["distance_bins"],        config["centroid_threshold"]))
+                d2_opts = _as_list(value_to_class(d2, 2*config["distance_bins"], 2*config["centroid_threshold"]))
+                d3_opts = _as_list(value_to_class(d3, config["distance_bins"],        config["centroid_threshold"]))
 
             # Checagem dos descritores que NÃO são distância (não viram lista)
-            # print(config["edge_threshold"],d1_opts, d1, d2_opts, d2, d3_opts, d3)
+            # print(d1_opts, d1, d2_opts, d2, d3_opts, d3)
             prefix = (depth1_class, depth2_class, depth3_class, rsa1_class, rsa2_class, rsa3_class)
             if None in prefix:
                 # algum descriptor obrigatório veio inválido; não há o que inserir
@@ -824,22 +660,18 @@ def find_triads(graph_data, classes, config, checks):
                     for d1_c, d2_c, d3_c in product(d1_opts, d2_opts, d3_opts):
                         full_describer = (chi, rsa1_class, rsa2_class, rsa3_class, d1_c, d2_c, d3_c)
                         full_describer_absolute = (chi, rsa1_class, rsa2_class, rsa3_class, d1, d2, d3)
+                        triad = (u_res_class, center_res_class, w_res_class, *full_describer)
 
-                        triad_class = [u_res_class, center_res_class, w_res_class]
-                        triad_abs = [outer_sorted[0], center, outer_sorted[1]]
-                        triad_token = (*triad_class, *full_describer)
-                        triad_full = (*triad_abs, *full_describer)
-                        triad_absolute = (*triad_abs, *full_describer_absolute)
-                        if triad_token not in triads:
-                            triads[triad_token] = {
+                        if triad not in triads:
+                            triads[triad] = {
                                 "count": 1,
-                                "triads_full": [triad_full],
-                                "triads_absolute": [triad_absolute]
+                                "triads_full": [(outer_sorted[0], center, outer_sorted[1], *full_describer)],
+                                "triads_absolute": [(outer_sorted[0], center, outer_sorted[1], *full_describer_absolute)]
                             }
                         else:
-                            triads[triad_token]["count"] += 1
-                            triads[triad_token]["triads_full"].append(triad_full)
-                            triads[triad_token]["triads_absolute"].append(triad_absolute)
+                            triads[triad]["count"] += 1
+                            triads[triad]["triads_full"].append((outer_sorted[0], center, outer_sorted[1], *full_describer))
+                            triads[triad]["triads_absolute"].append((outer_sorted[0], center, outer_sorted[1], *full_describer_absolute))
             # else:
                 # logging.debug(f"None Found: ({outer_sorted[0], center, outer_sorted[1], d1, d2, d3} | {full_describer}")
     n_triad = 0
@@ -905,6 +737,50 @@ ROLE_TO_PAIR_IDX = {
     "CW": (1, 2),  # (c, w)
 }
 
+# def cross_protein_triads(triads_per_protein, diff):
+#     """
+#     Parameters
+#     ----------
+#     triads_per_protein : list[dict]
+#         Each dict is the `triads` object you already create for one protein.
+#         Keys  -> token tuples, e.g. ('C1','C2','C4',3,10,3)
+#         Values -> {"count": int, "triads_full": [triplet tuples …]}
+
+#     Returns
+#     -------
+#     dict
+#         token -> list of combinations, where each combination contains
+#                  exactly one element from each protein’s `triads_full`.
+#                  Example length‑3 combination:
+#                  (
+#                    ('A:ALA:15', 'A:LYS:17', 'A:LEU:20', 1, 5, 10),  # protein‑1
+#                    ('B:ALA:33', 'B:LYS:35', 'B:LEU:39', 1, 5, 10),  # protein‑2
+#                    ('C:ALA:7',  'C:LYS:12', 'C:LEU:19', 1, 5, 10)   # protein‑3
+#                  )
+#     """
+#     # Tokens present in *all* proteins
+#     common_tokens = set.intersection(*(set(t.keys()) for t in triads_per_protein))
+#     cross_combos = {"full": {}, "partial": {}}
+#     for token in common_tokens:
+#         cross_combos["full"][token] = set()
+#         triad_lists = [prot_triads[token]["triads_absolute_d1"] for prot_triads in triads_per_protein]
+    
+#         indexed_lists = list(enumerate(triad_lists))
+#         ordered_triad_lists =  sorted(indexed_lists, key=lambda x: len(x[1]))
+
+#         refTriad_list = ordered_triad_lists[0][1]
+#         for triad in refTriad_list:
+#             product_list = []
+#             for i in range(1, len(triad_lists)):
+#                 index_original = ordered_triad_lists[i][0]
+#                 list_i = ordered_triad_lists[i][1]
+                
+#         cross_combos["full"][token] = set(product(*triad_lists))  # full Cartesian product
+
+     
+#     return cross_combos
+
+
 def _build_index(abs_list):
     """
     abs_list: lista de tuplas (r1, r2, r3, d1, d2, d3)
@@ -930,10 +806,10 @@ def _range_ids(sorted_pairs, lo, hi):
 
 def cross_protein_triads(triads_per_protein, diff, check_distances=True):
     """
-    triads_per_protein: list of dictionaries per protein.
-      For a token t:
-        triads_per_protein[p][t]["triads_absolute_d1"]  -> list (r1,r2,r3,d1,d2,d3)
-    diff: tolerance for the difference of distances
+    triads_per_protein: lista de dicionários por proteína.
+      Para um token t:
+        triads_per_protein[p][t]["triads_absolute_d1"]  -> lista de (r1,r2,r3,d1,d2,d3)
+    diff: tolerância para d1 e d3; para d2 usa-se 2*diff
     """
     import math
     common_tokens = set.intersection(*(set(d.keys()) for d in triads_per_protein))
@@ -966,7 +842,9 @@ def cross_protein_triads(triads_per_protein, diff, check_distances=True):
             for ref_rec in ref_idx["records"]:
                 d1_ref, d2_ref, d3_ref = ref_rec[-3], ref_rec[-2], ref_rec[-1]
 
-                w1 = w2 = w3 = diff
+                w1 = diff
+                w2 = 2 * diff
+                w3 = diff
 
                 all_candidates = []
                 ok = True
@@ -1022,13 +900,13 @@ def filter_cross_combos(
     cross_combos: Dict,
     graph_datas: List[Dict[str, Any]],
     *,
-    distance_std_threshold: float,
+    distance_diff_threshold: float,
     roles_to_check: Iterable[str] = ("UC", "CW"), 
     offset: int = 0,
 ) -> Dict[Tuple, List[Tuple[Tuple, ...]]]:
     """
     Mantém no combo apenas aqueles em que, para cada 'role' verificado,
-    (max(distâncias reais) - min(distâncias reais)) <= distance_std_threshold.
+    (max(distâncias reais) - min(distâncias reais)) <= distance_diff_threshold.
 
     cross_combos: saída do seu cross_protein_triads (token -> list[combo])
     graph_datas:  lista de graph_data (um por proteína, na MESMA ordem usada no cross_combos)
@@ -1068,7 +946,7 @@ def filter_cross_combos(
                     vals.append(d)
 
                 sigma = pstdev(vals) if len(vals) > 1 else 0.0
-                if sigma > distance_std_threshold:
+                if sigma > distance_diff_threshold:
                     ok = False
                     break
                 partial_tokens.append(tuple(_subtoken))
@@ -1109,6 +987,98 @@ def filter_cross_combos(
 
     return filtered
 
+def filter_cross_combos_backup(
+    cross_combos: Dict,
+    graph_datas: List[Dict[str, Any]],
+    *,
+    distance_diff_threshold: float,
+    roles_to_check: Iterable[str] = ("UC", "CW"), 
+) -> Dict[Tuple, List[Tuple[Tuple, ...]]]:
+    """
+    Mantém no combo apenas aqueles em que, para cada 'role' verificado,
+    (max(distâncias reais) - min(distâncias reais)) <= distance_diff_threshold.
+
+    cross_combos: saída do seu cross_protein_triads (token -> list[combo])
+    graph_datas:  lista de graph_data (um por proteína, na MESMA ordem usada no cross_combos)
+    """
+    roles_to_check = tuple(roles_to_check)
+    filtered: Dict[Tuple, List[Tuple[Tuple, ...]]]= {}
+    filtered_partial = {}
+    cross_combo_len = len(cross_combos["full"].keys())
+    compatible = build_token_compatibility(cross_combos["full"])
+
+    full_token = {}
+    ti = 1
+    tok_len = "\n".join([(token, len(combos)) for token, combos in cross_combos["full"].items()])
+    print(tok_len)
+
+    for token, combos in cross_combos["full"].items():
+        print(f"Token: {ti}/{cross_combo_len} | Combos: {len(combos)}")
+        full_token[token] = {}
+        filtered_partial[token] = set()
+        full_partial_tokens = set()
+        ti += 1
+        kept = []
+        tc = 1
+        for combo in combos:
+            partial_tokens = []
+            # print(f"Combo: {tc}/{combos_len}")
+            ok = True
+            tc += 1
+            for role in roles_to_check:
+                _subtoken = []
+                vals = []
+                for k, tri_k in enumerate(combo):
+                    a, b = pair_nodes_from_tri_full(tri_k, role)
+                    d = pair_distance_from_graph(a, b, graph_datas[k])
+                    _subtoken.append((a, b))
+                    vals.append(d)
+
+                sigma = pstdev(vals) if len(vals) > 1 else 0.0
+                if sigma > distance_diff_threshold:
+                    ok = False
+                    break
+                partial_tokens.append(tuple(_subtoken))
+                
+            if ok: 
+                kept.append(combo)
+                full_token[token][combo] = partial_tokens
+                full_partial_tokens.union(set(partial_tokens))
+        if kept:
+            filtered[token] = kept
+            filtered_partial[token] = full_partial_tokens
+    # print(cross_combos["full"].keys())
+    # print(f'Cross: {cross_combos["full"][ttt]}')
+    # print(f'full token combo: {full_token[ttt]}')
+    # print(f'Filtered: {filtered[ttt]}')
+    # input()
+    ti = 1
+    for token, combos in filtered.items():
+        print(f"[FILTERED] Token: {ti}/{cross_combo_len} | Combo: {len(combos)}")
+        compat_tokens = compatible[token]
+        partial_tokens = []
+        ti += 1
+        kept = []
+        tc = 1
+        for combo in combos:
+            ok = False
+            part_tokens = full_token[token][combo]
+            for part_token in part_tokens:
+                for compat_token in compat_tokens:
+                    if part_token in filtered_partial[compat_token]:
+                        ok = True
+                        break
+                if ok:
+                    break
+
+            if ok:
+                kept.append(combo)
+
+        if kept:
+            filtered[token] = kept
+
+    return filtered
+
 def association_tokens_for_combo(
     combo: Tuple[Tuple, ...],
     roles_for_tokens: Iterable[str] = ("UC", "CW"),
@@ -1125,6 +1095,21 @@ def association_tokens_for_combo(
         toks.append((role, pairs))
     return toks
 
+def index_filtered_combos_by_association(
+    filtered_cross_combos: Dict[Tuple, List[Tuple[Tuple, ...]]],
+    *,
+    roles_for_tokens: Iterable[str] = ("UC", "CW"),
+) -> Dict[Tuple, List[Tuple[Tuple, ...]]]:
+    """
+    Inverte: anchor_token -> lista de combos aprovados que realizam a mesma associação.
+    """
+    roles_for_tokens = tuple(roles_for_tokens)
+    assoc_index: Dict[Tuple, List[Tuple[Tuple, ...]]]= defaultdict(list)
+    for _token, combos in filtered_cross_combos.items():
+        for combo in combos:
+            for atok in association_tokens_for_combo(combo, roles_for_tokens=roles_for_tokens):
+                assoc_index[atok].append(combo)
+    return assoc_index
 
 def build_graph_from_filtered_combos(filtered_cross_combos: Dict[Tuple, List[Tuple[Tuple, ...]]]):
     """
@@ -1149,6 +1134,7 @@ def rebuild_filtered_combos(filtered_cross_combos: Dict[Tuple, List[Tuple[Tuple,
     filtered_cross_combos_new = {}
     graph_nodes = set(graph_nodes)
 
+
     for _token, combos in filtered_cross_combos.items():
         keep = []
         for combo in combos:
@@ -1160,6 +1146,9 @@ def rebuild_filtered_combos(filtered_cross_combos: Dict[Tuple, List[Tuple[Tuple,
         if keep:
             filtered_cross_combos_new[_token] = keep
     return filtered_cross_combos_new
+
+    
+
 
 def tokens_compatible(t1, t2):
     """
@@ -1256,6 +1245,95 @@ def build_token_compatibility(cross_combos):
         compat[t1] = [c for c in candidates if c != t1]
     return compat
 
+def build_combos_graph(cross_combos):
+    nodes, edges, locator = [], set(), {}
+    nid = 0
+    
+    for token, combos in cross_combos.items():
+        log.debug(f"Token: {token} | Combos: {len(combos)}")
+        for idx, combo in enumerate(combos):
+            locator[(token, idx)] = nid
+            nodes.append({"id": nid, "token": token, "combo": combo})
+            nid += 1
+
+    log.debug(f"Building Token Compatibility")
+    compat = build_token_compatibility(cross_combos)
+    log.debug(f"THe build token compatibilited finalized")
+    seen = set()
+
+    def shared_distance(tri, idx_pair):
+        if idx_pair == (0,1):
+            return tri[9]
+        elif idx_pair == (1,2):
+            return tri[11]
+        else:
+            raise AssertionError(f"Unexpected shared indices {idx_pair}, center must be shared")
+
+    for t1, comp_list in compat.items():
+        for t2 in comp_list:
+            if (t2, t1) in seen:
+                continue
+            seen.add((t1, t2))
+
+            c1_list, c2_list = cross_combos[t1], cross_combos[t2]
+            iterator = (
+                combinations(range(len(c1_list)), 2)
+                if t1 == t2 else product(range(len(c1_list)), range(len(c2_list)))
+            )
+
+            for i, j in iterator:
+                combo1, combo2 = c1_list[i], c2_list[j]
+                first_idx_pair = None
+                valid = True
+
+                for tri1, tri2 in zip(combo1, combo2):
+                    shared = set(tri1[:3]) & set(tri2[:3])
+                    if len(shared) != 2 or tri1[1] not in shared or tri2[1] not in shared:
+                        valid = False
+                        break
+
+                    idx1 = tuple(sorted(k for k,v in enumerate(tri1[:3]) if v in shared))
+                    idx2 = tuple(sorted(k for k,v in enumerate(tri2[:3]) if v in shared))
+
+                    if first_idx_pair is None:
+                        first_idx_pair = (idx1, idx2)
+
+                    elif (idx1, idx2) != first_idx_pair:
+                        valid = False
+                        break
+
+                    d1 = shared_distance(tri1, idx1)
+                    d2 = shared_distance(tri2, idx2)
+                    if d1 != d2:
+                        valid = False
+                        break
+
+                if not valid:
+                    continue
+               
+                u1, c1, w1 = [], [], []
+                u2, c2, w2 = [], [], []
+                for tr1, tr2 in zip(combo1, combo2):
+                    u1.append(tr1[0])
+                    c1.append(tr1[1])
+                    w1.append(tr1[2])
+
+                    u2.append(tr2[0])
+                    c2.append(tr2[1])
+                    w2.append(tr2[2])
+                
+                u1, c1, w1 = tuple(u1), tuple(c1), tuple(w1)
+                u2, c2, w2 = tuple(u2), tuple(c2), tuple(w2)
+                for a, b in ((c1, u1), (c1, w1), (c2, u2), (c2, w2)):
+                    if a == b:
+                        continue
+                    edge = tuple(sorted((a,b)))
+                    edges.add(edge)
+
+    # return {"nodes": nodes, "edges": edges}
+    return edges
+
+
 def parse_node(node: str) -> Tuple[str, str, int]:
     chain, res, num = node.split(":")
     try:
@@ -1291,48 +1369,419 @@ def pair_indices_from_tri_full(tri_full: Tuple, role: str) -> Tuple[int, int]:
     _, _, ib = parse_node(b)
     return (ia, ib) if ia < ib else (ib, ia)
 
-def _extract_chain_from_idx(idx, maps):
-    res_tuple = maps["residue_maps_unique"].get(idx, None)
-    if res_tuple is None:
-        return None
-    return res_tuple[0]  # cadeia
 
-def _build_threshold_matrix(nodes, maps, threshold_cfg):
-    K = len(nodes)
-    dim = len(nodes[0])
+# def parse_node(node: str) -> Tuple[str, str, int]:
+#     """
+#     Parse a node id of the form 'Chain:RES:ResNum' into (chain, resname, resnum_int).
+#     """
+#     parts = node.split(":")
+#     if len(parts) != 3:
+#         raise ValueError(f"Invalid node id: {node}")
+#     chain, res, num = parts[0], parts[1], parts[2]
+#     try:
+#         num_i = int(num)
+#     except ValueError:
+#         # handle cases like "-1A" where insertion code is attached; keep digits and sign
+#         import re
+#         m = re.match(r"(-?\d+)", num)
+#         if not m:
+#             raise
+#         num_i = int(m.group(1))
+#     return chain, res, num_i
 
-    # caso seja float, retorna matriz cheia
-    if not isinstance(threshold_cfg, dict):
-        return np.full((K, K), float(threshold_cfg), dtype=float)
 
-    default_thr = float(threshold_cfg.get("default", 2.0))
-    mix_thr = float(threshold_cfg.get("mix", default_thr))
+# def find_triads(graph_data: Dict[str, Any],
+#                 classes: Dict[str, Any],
+#                 config: Dict[str, Any],
+#                 checks: Dict[str, bool]):
+#     """
+#     Extrai tríades por proteína, discretiza descritores (depth, RSA, distâncias)
+#     e agrega em um dicionário: token -> {count, triads_full[]}.
 
-    # chains[p, i] cadeia do no i na proteina p
-    chains = np.empty((dim, K), dtype=object)
-    for p in range(dim):
-        for i in range(K):
-            chains[p, i] = _extract_chain_from_idx(nodes[i][p], maps)
+#     token = (u_res_class, c_res_class, w_res_class,
+#              depth1, depth2, depth3, rsa1, rsa2, rsa3, d_uc, d_uw, d_cw)
 
-    # all_eq True se para todos p a cadeia de i e j sao iguais
-    all_eq = np.ones((K, K), dtype=bool)
-    for p in range(dim):
-        ci = chains[p, :][:, None]  # Kx1
-        cj = chains[p, :][None, :]  # 1xK
-        all_eq &= (ci == cj)
+#     tri_full = (u_str, c_str, w_str, depth1, depth2, depth3, rsa1, rsa2, rsa3, d_uc, d_uw, d_cw)
+#     """
+#     G            = graph_data["graph"]
+#     depth_df     = graph_data["residue_depth"]
+#     rsa          = graph_data["rsa"]
+#     contact_map  = graph_data["contact_map"]
+#     residue_map  = graph_data["residue_map_all"]
 
-    # threshold por cadeia
-    def thr_for_chain(c):
-        return float(threshold_cfg.get(c, default_thr)) if c is not None else default_thr
+#     triads: Dict[Tuple, Dict[str, Any]] = {}
 
-    row_chain = chains[0, :]                                   # K
-    row_thr = np.vectorize(thr_for_chain)(row_chain).astype(float)  # K
+#     # classes de resíduos (opcional)
+#     if "residues" in classes.keys():
+#         residue_classes = {
+#             res: class_name
+#             for class_name, residues in classes["residues"].items()
+#             for res in residues
+#         }
+#     else:
+#         residue_classes = None
 
-    # base com mix e substitui onde all_eq usando broadcast
-    T = np.full((K, K), mix_thr, dtype=float)
-    T = np.where(all_eq, row_thr[:, None], T)
+#     rsa_classes      = classes.get("rsa")
+#     depth_classes    = classes.get("depth")
+#     distance_classes = classes.get("distance")
 
-    return T
+#     n_nodes = len(G.nodes())
+#     n_edges = len(G.edges())
+
+#     def get_depth_safe(label: str) -> Union[float, None]:
+#         # label tipo "42A" (numero+cadeia)
+#         series = depth_df.loc[depth_df["ResNumberChain"] == label]["ResidueDepth"]
+#         if len(series) == 0:
+#             return None
+#         return float(series.values[0])
+
+#     for center in G.nodes():
+#         neighbors = {n for n in G.neighbors(center) if n != center}
+#         for u, w in combinations(neighbors, 2):
+#             outer_sorted = tuple(sorted([u, w]))
+#             u_split, center_split, w_split = outer_sorted[0].split(":"), center.split(":"), outer_sorted[1].split(":")
+#             u_res, center_res, w_res = u_split[1], center_split[1], w_split[1]
+
+#             # índices para contact_map
+#             u_tuple      = residue_to_tuple(outer_sorted[0])
+#             center_tuple = residue_to_tuple(center)
+#             w_tuple      = residue_to_tuple(outer_sorted[1])
+#             u_index, center_index, w_index = residue_map[u_tuple], residue_map[center_tuple], residue_map[w_tuple]
+
+#             # classe de resíduo
+#             if residue_classes is not None:
+#                 u_res_class, center_res_class, w_res_class = residue_classes[u_res], residue_classes[center_res], residue_classes[w_res]
+#             else:
+#                 u_res_class, center_res_class, w_res_class = u_res, center_res, w_res
+
+#             # chaves para depth
+#             u_resChain      = str(u_split[2])      + u_split[0]
+#             center_resChain = str(center_split[2]) + center_split[0]
+#             w_resChain      = str(w_split[2])      + w_split[0]
+
+#             # distâncias geométricas
+#             d_uc = contact_map[u_index, center_index]
+#             d_uw = contact_map[u_index, w_index]
+#             d_cw = contact_map[center_index, w_index]
+
+#             # RSA (em %)
+#             rsa1 = rsa[outer_sorted[0]] * 100.0
+#             rsa2 = rsa[center]          * 100.0
+#             rsa3 = rsa[outer_sorted[1]] * 100.0
+
+#             # Depth
+#             if checks.get("depth", False):
+#                 depth1 = get_depth_safe(u_resChain)
+#                 depth2 = get_depth_safe(center_resChain)
+#                 depth3 = get_depth_safe(w_resChain)
+#                 if any(v is None for v in (depth1, depth2, depth3)):
+#                     # se faltar depth obrigatória, pula
+#                     continue
+
+#                 if depth_classes is not None:
+#                     depth1_c = find_class(depth_classes, depth1)
+#                     depth2_c = find_class(depth_classes, depth2)
+#                     depth3_c = find_class(depth_classes, depth3)
+#                 else:
+#                     depth1_c = value_to_class(depth1, config["depth_bins"],  config["depth_filter"])
+#                     depth2_c = value_to_class(depth2, config["depth_bins"],  config["depth_filter"])
+#                     depth3_c = value_to_class(depth3, config["depth_bins"],  config["depth_filter"])
+#             else:
+#                 depth1_c = depth2_c = depth3_c = 0
+
+#             # RSA discretizada
+#             if checks.get("rsa", False):
+#                 if rsa_classes is not None:
+#                     rsa1_c = find_class(rsa_classes, rsa1)
+#                     rsa2_c = find_class(rsa_classes, rsa2)
+#                     rsa3_c = find_class(rsa_classes, rsa3)   # <- fix aqui
+#                 else:
+#                     thr = config["rsa_filter"] * 100.0
+#                     # rsa1_c = value_to_class(rsa1, config["rsa_bins"], thr, inverse=True)
+#                     # rsa2_c = value_to_class(rsa2, config["rsa_bins"], thr, inverse=True)
+#                     # rsa3_c = value_to_class(rsa3, config["rsa_bins"], thr, inverse=True)
+#                     rsa1_c, rsa2_c, rsa3_c = 0, 0, 0
+#             else:
+#                 rsa1_c = rsa2_c = rsa3_c = 0
+
+#             # Distâncias -> listas de opções de classe
+#             if distance_classes is not None:
+#                 d_uc_opts = _as_list(find_class(distance_classes, d_uc))
+#                 d_uw_opts = _as_list(find_class(distance_classes, d_uw))
+#                 d_cw_opts = _as_list(find_class(distance_classes, d_cw))
+#             else:
+#                 d_uc_opts = _as_list(value_to_class(d_uc,        config["distance_bins"],        config["centroid_threshold"]))
+#                 d_uw_opts = _as_list(value_to_class(d_uw,   2 *  config["distance_bins"],   2 * config["centroid_threshold"]))
+#                 d_cw_opts = _as_list(value_to_class(d_cw,        config["distance_bins"],        config["centroid_threshold"]))
+
+#             prefix = (depth1_c, depth2_c, depth3_c, rsa1_c, rsa2_c, rsa3_c)
+#             if None in prefix:
+#                 continue
+#             if not (d_uc_opts and d_uw_opts and d_cw_opts):
+#                 continue
+
+#             for d_uc_c, d_uw_c, d_cw_c in product(d_uc_opts, d_uw_opts, d_cw_opts):
+#                 # full_desc = (*prefix, d_uc_c, d_uw_c, d_cw_c)
+#                 full_desc = ( d_uc_c, d_uw_c, d_cw_c)
+#                 token     = (u_res_class, center_res_class, w_res_class, *full_desc)
+#                 tri_full  = (outer_sorted[0], center, outer_sorted[1], *full_desc)
+#                 if token not in triads:
+#                     triads[token] = {"count": 1, "triads_full": [tri_full]}
+#                 else:
+#                     triads[token]["count"] += 1
+#                     triads[token]["triads_full"].append(tri_full)
+
+#     n_triad = sum(v["count"] for v in triads.values())
+#     counters = Counter(v["count"] for v in triads.values())
+#     logging.info(f"N Nodes: {n_nodes} | N Edges: {n_edges} | N Triad: {n_triad} | Unique Triad: {len(triads.keys())}")
+#     logging.debug(f"Counters: {dict(counters)}")
+#     return triads
+
+
+# # ------------------------------------------------------------------
+# # 2) Cross entre proteínas (materializado – útil, mas caro)
+# # ------------------------------------------------------------------
+
+# def cross_protein_triads(triads_per_protein: List[Dict]) -> Dict[Tuple, List[Tuple]]:
+#     """
+#     Interseção de tokens e produto cartesiano das listas triads_full
+#     (igual à sua versão, pode explodir – mantido por compatibilidade).
+#     """
+#     common_tokens = set.intersection(*(set(t.keys()) for t in triads_per_protein))
+#     cross_combos = {}
+#     for token in common_tokens:
+#         triad_lists = [prot_triads[token]["triads_full"] for prot_triads in triads_per_protein]
+#         cross_combos[token] = list(product(*triad_lists))
+#         # log.debug(f"Cross_combo: {token} | {len(cross_combos[token])}")
+#         # input()
+#     return cross_combos
+
+
+# # ------------------------------------------------------------------
+# # 3) Compatibilidade de tokens (pré-filtro por padrão com 2 fixos + distância)
+# # ------------------------------------------------------------------
+
+# def build_token_compatibility(cross_tokens: Iterable[Tuple]) -> Dict[Tuple, List[Tuple]]:
+#     """
+#     Gera padrões do tipo (A,B,*,dAB), (B,A,*,dAB), (A,*,B,dAU), (B,*,A,dAU),
+#                         (*,B,C,dBC), (*,C,B,dBC).
+#     Indexa pattern -> tokens. Para cada token, união dos seus padrões.
+#     """
+#     tokens = list(cross_tokens)
+#     pattern_map: Dict[Tuple, Set[Tuple]] = defaultdict(set)
+#     token_patterns: Dict[Tuple, List[Tuple]] = {}
+
+#     for t in tokens:
+#         A, B, C, *rest = t
+#         d_uc, d_uw, d_cw = rest[-3], rest[-2], rest[-1]
+#         pats = [
+#             (A,    B,    None, d_uc),
+#             (B,    A,    None, d_uc),
+#             # (A,    None, B,    d_uw),
+#             # (B,    None, A,    d_uw),
+#             (None, B,    C,    d_cw),
+#             (None, C,    B,    d_cw),
+#         ]
+#         token_patterns[t] = pats
+#         for p in pats:
+#             pattern_map[p].add(t)
+
+#     compat: Dict[Tuple, List[Tuple]] = {}
+#     for t in tokens:
+#         cands = set()
+#         for p in token_patterns[t]:
+#             cands |= pattern_map[p]
+#         cands.discard(t)
+#         compat[t] = list(cands)
+#     return compat
+
+
+# # ------------------------------------------------------------------
+# # 4) Índices por proteína (par concreto + classe de distância + papel)
+# # ------------------------------------------------------------------
+
+# def build_indices_for_protein(triads: Dict[Tuple, Dict[str, Any]]):
+#     """
+#     Cria índices locais que permitem ir DIRETO aos candidatos que compartilham
+#     (i,j) reais e a mesma classe de distância do par compartilhado.
+
+#     Retorno:
+#       {
+#         "pair_index": Dict[(i,j,d_class,rolepair) -> List[(token, tri_full)]],
+#         "token_postings": Dict[token -> Dict[(i,j,d_class,rolepair) -> List[tri_full]]]
+#       }
+#     rolepair ∈ {"UC","UW","CW"}  identifica qual aresta é o par.
+#     """
+#     pair_index: Dict[Tuple[int,int,Any,str], List[Tuple[Tuple, Tuple]]] = defaultdict(list)
+#     token_postings: Dict[Tuple, Dict[Tuple[int,int,Any,str], List[Tuple]]] = defaultdict(lambda: defaultdict(list))
+#     # log.debug(f"Triads: {triads}")
+#     for token, payload in triads.items():
+#         # log.debug(f"Token: {token} | payload: {payload}")
+#         for tri in payload["triads_full"]:
+#             u, c, w = tri[0], tri[1], tri[2]
+#             _, _, u_id = parse_node(u)
+#             _, _, c_id = parse_node(c)
+#             _, _, w_id = parse_node(w)
+
+#             d_uc, d_uw, d_cw = tri[-3], tri[-2], tri[-1]
+
+#             keys = [
+#                 (min(u_id, c_id), max(u_id, c_id), d_uc, "UC"),
+#                 (min(u_id, w_id), max(u_id, w_id), d_uw, "UW"),
+#                 (min(c_id, w_id), max(c_id, w_id), d_cw, "CW"),
+#             ]
+#             for K in keys:
+#                 pair_index[K].append((token, tri))
+#                 token_postings[token][K].append(tri)
+#         # log.debug(f"pair_index: {pair_index}\nToken_postings: {token_postings}")
+#         # input()            
+#     return {"pair_index": pair_index, "token_postings": token_postings}
+
+
+# # ------------------------------------------------------------------
+# # 5) Grafo de combinações sem explosão: join guiado por índices
+# # ------------------------------------------------------------------
+
+# def build_combos_graph_indexed(triads_per_protein: List[Dict[Tuple, Dict[str, Any]]]):
+#     """
+#     Reescreve a etapa cara usando índices por proteína. Não materializa cross_combos.
+#     Para cada par de tokens compatíveis, intersecta diretamente as chaves
+#     (i,j,d,rolepair) entre os dois tokens em cada proteína e faz join multi-proteína.
+
+#     Retorna:
+#       edges: Set[Tuple[Tuple, Tuple]]
+#         Arestas entre blocos (sequências de nós por papel) como no seu build original.
+#     """
+#     # índices por proteína
+#     perP = [build_indices_for_protein(tri) for tri in triads_per_protein]
+#     log.debug(f"Fiz as build indices")
+#     # universo de tokens e compatibilidade por padrão
+#     # all_tokens: Set[Tuple] = set()
+#     # for tri in triads_per_protein:
+#     #     all_tokens |= set(tri.keys())
+#     # compat = build_token_compatibility(all_tokens)
+#     common_tokens = set.intersection(*(set(t.keys()) for t in triads_per_protein))
+#     compat = build_token_compatibility(common_tokens)
+#     log.debug(f"Fiz as compatibilidades | {len(compat.items())}")
+#     edges: Set[Tuple[Tuple, Tuple]] = set()
+
+#     for t1, comp_list in compat.items():
+#         print(f"COmpat_list: {len(comp_list)}")
+#         for t2 in comp_list:
+#             perP_pairs: List[List[Tuple[Tuple, Tuple]]] = []
+#             possible = True
+
+#             for idxP, idx in enumerate(perP):
+
+#                 postings1 = idx["token_postings"].get(t1, {})
+#                 postings2 = idx["token_postings"].get(t2, {})
+#                 if not postings1 or not postings2:
+#                     possible = False
+#                     break
+#                 # if idxP == 1:
+#                 #     log.debug(f"t1: {t1}, t2: {t2}, comp_list: {comp_list}")
+#                 #     # input()
+#                 #     log.debug(f"idxP: {idxP}")
+#                 #     # input()
+#                 #     log.debug(f"Postings 1: {postings1}")
+#                 #     log.debug(f"Postings 2: {postings2}")
+#                     # input()
+#                 # Apenas as chaves (i,j,d,role) que ambos os tokens realizam nessa proteína
+#                 common_keys = set(postings1.keys()) & set(postings2.keys())
+#                 log.debug(f"{idxP}: Common Keys: {len(common_keys)}")
+#                 # if idxP == 1: log.debug(f"Common Keys: {common_keys}")
+#                 if not common_keys:
+#                     possible = False
+#                     break
+
+#                 pairs_here: List[Tuple[Tuple, Tuple]] = []
+#                 for K in common_keys:
+#                     L1 = postings1[K]
+#                     L2 = postings2[K]
+#                     print(f"L1: {len(L1)} | L2: {len(L2)}")
+#                     # if idxP == 1:
+#                     #     log.debug(f"K: {K}\nL1: {L1}\nL2: {L2}")
+
+#                     # Produto LOCAL (listas curtas)
+#                     for tri1 in L1:
+#                         for tri2 in L2:
+#                             pairs_here.append((tri1, tri2))
+
+#                 if not pairs_here:
+#                     possible = False
+#                     break
+                
+#                 perP_pairs.append(pairs_here)
+#                 log.debug(f"Added: {len(pairs_here)} pairs | New len: {len(perP_pairs)}")
+#             if not possible:
+#                 continue
+#             # log.debug(perP_pairs)
+#             # input()
+#             # Join multi-proteína somente sobre pares localmente válidos
+#             log.debug(f"Per pair: {perP_pairs}")
+#             products =  [pair_combo for pair_combo in product(*perP_pairs)]
+#             log.debug(f"Products: {len(products)}")
+#             # input()
+#             for pair_combo in products:
+#                 # pair_combo: ((tri1_P1, tri2_P1), (tri1_P2, tri2_P2), ...)
+#                 # log.debug(f"Pair Combo: {pair_combo}")
+#                 u1, c1, w1 = [], [], []
+#                 u2, c2, w2 = [], [], []
+
+#                 for (tri1, tri2) in pair_combo:
+#                     u1.append(tri1[0]); c1.append(tri1[1]); w1.append(tri1[2])
+#                     u2.append(tri2[0]); c2.append(tri2[1]); w2.append(tri2[2])
+#                 # log.debug(f"u1: {u1}, c1: {c1}, w1: {w1}\nu2: {u2}, c2: {c2}, w2: {w2}")
+#                 u1, c1, w1 = tuple(u1), tuple(c1), tuple(w1)
+#                 u2, c2, w2 = tuple(u2), tuple(c2), tuple(w2)
+
+#                 # mesmas arestas que você monta no build antigo
+#                 # edges_add = set()
+#                 for a, b in ((c1, u1), (c1, w1), (c2, u2), (c2, w2)):
+#                     if a == b:
+#                         continue
+#                     edge = tuple(sorted((a, b)))
+#                     # edges_add.add(edge)
+#                     edges.add(edge)
+#                 # log.debug(f"Edges adicionadas: {edges_add}")
+#     return edges
+
+
+# # ------------------------------------------------------------------
+# # 6) Opcional: checagens de compatibilidade exata entre tokens
+# #     (mantidas por completude; o fluxo indexado já garante via (i,j,d,role))
+# # ------------------------------------------------------------------
+
+# def tokens_compatible(t1: Tuple, t2: Tuple) -> bool:
+#     """
+#     Cada token: (res1,res2,res3, dists...)
+#     True se compartilham exatamente dois resíduos, ambos os centrais inclusos,
+#     e a classe de distância do par compartilhado coincide.
+#     """
+#     (A, B, C, *rest1) = t1
+#     (X, Y, Z, *rest2) = t2
+#     d1, d2, d3 = rest1[-3], rest1[-2], rest1[-1]
+#     e1, e2, e3 = rest2[-3], rest2[-2], rest2[-1]
+
+#     cnt1 = Counter([A, B, C])
+#     cnt2 = Counter([X, Y, Z])
+#     shared = list((cnt1 & cnt2).elements())
+#     if len(shared) != 2:
+#         return False
+#     if B not in shared or Y not in shared:
+#         return False
+
+#     def build_map(a, b, c, d1, d2, d3):
+#         return {
+#             frozenset((a, b)): d1,
+#             frozenset((a, c)): d2,
+#             frozenset((b, c)): d3,
+#         }
+
+#     map1 = build_map(A, B, C, d1, d2, d3)
+#     map2 = build_map(X, Y, Z, e1, e2, e3)
+#     key = frozenset(shared)
+#     return map1.get(key) == map2.get(key)
 
 def create_std_matrix(nodes, matrices: dict, maps: dict, threshold: float = 3.0):
     dim = len(nodes[0])
@@ -1355,12 +1804,6 @@ def create_std_matrix(nodes, matrices: dict, maps: dict, threshold: float = 3.0)
             stacked_pruned[p,  i, :] = matrices["dm_pruned"][idx[i],  idx]
             stacked_thresh[p, i, :]  = matrices["dm_thresholded"][idx[i], idx]
 
-    mask_invalid_pruned = np.any((stacked_pruned == 0) | np.isnan(stacked_pruned), axis=0)
-    mask_invalid_thresh = np.any((stacked_thresh == 0) | np.isnan(stacked_thresh), axis=0)
-
-    stacked_pruned[:, mask_invalid_pruned] = np.nan
-    stacked_thresh[:, mask_invalid_thresh] = np.nan
-
     var_pruned = np.std(stacked_pruned, axis=0)    
     var_thresh = np.std(stacked_thresh, axis=0)  
 
@@ -1370,14 +1813,12 @@ def create_std_matrix(nodes, matrices: dict, maps: dict, threshold: float = 3.0)
     var_pruned = np.where(mask_pruned, np.nan, var_pruned)
     var_thresh = np.where(mask_thresh, np.nan, var_thresh)        
 
-    T = _build_threshold_matrix(nodes, maps, threshold)
-
-    mask_valid = (0 < var_pruned) & (var_pruned < T)
+    mask_valid = (0 < var_pruned) & (var_pruned < threshold)
     mask_invalid = ~mask_valid
     var_pruned[mask_valid] = 1
     var_pruned[mask_invalid] = np.nan
 
-    mask_valid = (0 < var_thresh) & (var_thresh < T)
+    mask_valid = (0 < var_thresh) & (var_thresh < threshold)
     mask_invalid = ~mask_valid
     var_thresh[mask_valid] = 1
     var_thresh[mask_invalid] = np.nan
@@ -1390,517 +1831,14 @@ def create_std_matrix(nodes, matrices: dict, maps: dict, threshold: float = 3.0)
 
     return new_matrices, maps
 
-# def execute_step(step, graph_data, graph_collection, max_chunks, qtd_graphs, config, filtered_cross_combos = None):
-#     logger = logging.getLogger("association.execute_step")
-
-#     if step == 1:  
-#         chunks_triads = [graph_collection["triads"][i:i+max_chunks] for i in range(0, qtd_graphs, max_chunks)]
-#         # input(f"Chunks_triads: {len(chunks_triads)}")
-
-#         for i, chunk_triad in enumerate(chunks_triads):
-
-#             logger.info(f"{step} | Creating combos | Chunk: {i}")
-#             cross_combos = cross_protein_triads(chunk_triad, config["distance_diff_threshold"])
-#             logger.info(f"{step} | Combos created")
-
-#             logger.info(f"{step} | Filtering combos...")
-#             qtd_combos_0 = len(cross_combos)
-#             filtered_combos = filter_cross_combos(cross_combos, graph_data, distance_std_threshold=config["distance_std_threshold"], roles_to_check=("UC", "CW", "UW"), offset=i*max_chunks)
-
-#             qtd_filtered_combos = len(filtered_combos) - qtd_combos_0
-#             logger.info(f"{step} | {qtd_filtered_combos} combos were eliminated")
-#     else:
-#         if not filtered_cross_combos:
-#             raise Exception("Filtered Cross Combos is empty")
-#         qtd_graphs = len(filtered_cross_combos)
-#         chunk_triads = [filtered_cross_combos[i:i+max_chunks] for i in range(0, qtd_graphs, max_chunks)]
-#         filtered_combos_list = [cross_protein_triads(chunk_triad, 1.0, check_distances=False)["full"] for i, chunk_triad in enumerate(chunk_triads) if not print(f"Creating | Combo Chunk: {i}") ] 
-#         logger.info(f"{step} | Creating combos | Chunk: {i}")
-
-
-
-#     triad_graph_list = [build_graph_from_filtered_combos(filtered_combos) for filtered_combos in filtered_combos_list]
-#     tuple_edges_list = [[tuple(edge) for edge in triad_graph] for triad_graph in triad_graph_list]
-#     Graphs_list = []
-#     for i, tuple_edge in enumerate(tuple_edges_list):
-#         G = nx.Graph()
-#         G.add_edges_from(tuple_edge)
-
-#         for comp in list(nx.connected_components(G)):
-#             if len(comp) == 3:
-#                 G.remove_nodes_from(comp)
-#         Graphs_list.append((i, G))
-
-#     components_list = [(G[0], list(nx.connected_components(G[1]))) for G in Graphs_list]
-
-#     Graphs_frames = []
-#     for comps_idx, components in components_list:
-#         index_offset = comps_idx * (max_chunks**passo)
-#         comp_id = 1
-#         processed_status = 1
-#         maps["inv_maps"] = inv_maps
-#         components_len = len(components)
-#         nodes_qtds = [len(comp) for comp in components]
-#         start_frame = time.perf_counter()
-#         G = Graphs_list[comps_idx][1]
-#         Graphs = [([G], 0)]
-
-#         Frames_comp = set()
-#         # input(f"Quantidade de components: {components_len} | Tamanho cada comp: {nodes_qtds}")
-#         for component in components:
-#             len_component = len(component)
-#             log.debug(f"[{passo}] {comp_id}: Processing component {processed_status} / {components_len} with {len_component} nodes")
-#             processed_status += 1
-#             if len_component <= 4: 
-#                 log.debug(f"[{passo}] {comp_id} Skipping component {processed_status-1}, because it has just {len_component} nodes")
-#                 continue
-#             subG = nx.Graph()
-#             subG.add_nodes_from(component)
-
-#             log.debug(f"[{passo}] {comp_id} Adding edges...")
-#             for u in component:
-#                 for v in G.neighbors(u):
-#                     if v in component:
-#                         subG.add_edge(u, v)
-
-#             # if len(component) == 346:
-#             #     input("Returning component 346")
-#             #     return {
-#             #         "AssociatedGraph": [([subG], 0)]
-#             #     }
-
-#             dm_thresh_graph = np.zeros((metadata["total_length"], metadata["total_length"]))
-#             log.debug(f"[{passo}] Creating dm_thresh_graph matrices...")
-#             for u, v in subG.edges():
-#                 for p, (res_u, res_v) in enumerate(zip(u, v)):
-#                     if res_u != res_v:
-#                         split_res_u, split_res_v = res_u.split(":"), res_v.split(":")
-#                         res_u_tuple = (split_res_u[0], split_res_u[2], split_res_u[1])
-#                         res_v_tuple = (split_res_v[0], split_res_v[2], split_res_v[1])
-#                         idx_u = inv_maps[p+index_offset][res_u_tuple]
-#                         try:
-#                             idx_v = inv_maps[p+index_offset][res_v_tuple]
-#                         except Exception as e:
-#                             raise Exception(f"Problema na proteína {p}, offset: {index_offset}, v tuple: {res_v_tuple}, passo: {passo}, comps_idx: {comps_idx}, comp_id: {comp_id}\nError: {e}")
-#                         dm_thresh_graph[idx_u, idx_v] = dm_thresh[idx_u, idx_v]
-#                         dm_thresh_graph[idx_v, idx_u] = dm_thresh[idx_v, idx_u]
-
-#             save(f"comp_id_{comp_id}", "dm_thresh_graph", dm_thresh)
-#             matrices_dict["dm_thresholded"] = dm_thresh_graph
-
-#             nodes = list(subG.nodes())
-#             nodes_indices = []
-
-#             for node in nodes:
-#                 node_converted = []
-#                 for k, res in enumerate(node):
-#                     res_split = res.split(":")
-#                     res_tuple = (res_split[0], res_split[2], res_split[1])
-#                     res_indice = inv_maps[k+index_offset][res_tuple]
-#                     node_converted.append(res_indice)
-#                 nodes_indices.append(node_converted)
-
-#             save(f"comp_id_{comp_id}", "nodes_indices", nodes_indices)
-#             log.debug(f"[{passo}] {comp_id} Creating the std_matrix...")
-#             matrices_mul, maps_mul = create_std_matrix(
-#                 nodes=nodes_indices,
-#                 matrices=matrices_dict,
-#                 maps=maps,
-#                 threshold=config["distance_std_threshold"]
-#             )
-
-#             log.debug(f"[{passo}] {comp_id} Finished creating the std_matrix.")
-
-#             save(f"comp_id_{comp_id}", "matrices_mul", matrices_mul)
-#             save(f"comp_id_{comp_id}", "maps_mul", maps_mul)
-#             
-#             debugar_ = True if len(nodes) > 300 else False
-
-#             tracer = TraversalTracer(
-#                 out_dir="viz_runs",
-#                 fmt="mp4",        # ou "mp4"
-#                 fps=12,
-#                 sample_every=50,  # amostragem para reduzir frames
-#                 max_frames=2000,  # corta se passar disso
-#                 dpi=110,
-#                 enabled=True
-#             )
-
-#             if not debugar_: tracer.enabled=False
-
-#             # if passo == 2 and len(nodes) > 5000:
-#             #     Graphs.extend([([subG], 1)])
-#             #     return {
-#             #         "AssociatedGraph": Graphs
-#             #     }
-
-#             frames, union_graph, error = generate_frames(
-#                 matrices=matrices_mul,
-#                 maps=maps_mul,
-#                 len_component=len_component,
-#                 chunk_id=comps_idx,
-#                 step=passo,
-#                 debug=debugar_,
-#                 tracer=tracer
-#             )
-
-#             if len(frames.keys()) > 1:
-#                 
-#                 if passo < passos: 
-#                     Frames_comp = Frames_comp.union(union_graph["edges_residues"])
-#                 else:
-#                     Graphs.extend([(create_graph(frames, typeEdge="edges_residues", comp_id=comp_id), comp_id)])
-
-#                 comp_id += 1
-#             else:
-#                 log.debug("Component Refused")
-#         tuple_edges_frames = [tuple(edge) for edge in Frames_comp]
-
-#         Graph_union_frames = nx.Graph()
-#         Graph_union_frames.add_edges_from(tuple_edges_frames)
-#         Graphs_frames.append((comps_idx, Graph_union_frames)) 
-
-#     filtered_cross_combos = [rebuild_filtered_combos(filtered_combos, Graphs_frames[i][1]) for i, filtered_combos in enumerate(filtered_combos_list)]
-
-#     ...
-
-
-def get_memory_usage_mb():
-    """
-    Retorna uso de memória RSS em MB, se psutil estiver disponível.
-    Caso contrário, retorna None.
-    """
-    try:
-        import psutil
-    except ImportError:
-        return None
-
-    process = psutil.Process(os.getpid())
-    return process.memory_info().rss / (1024 ** 2)
-
-def write_json_raw(path, data):
-    """
-    Salva dados em JSON bruto, indentado.
-    """
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
-        
-def execute_step(
-    step_idx: int,
-    graph_collection,
-    max_chunks: int,
-    current_filtered_cross_combos,
-    graph_data,
-    global_state,
-):
-
-    profiling = global_state.get("profiling", None)
-    debug = bool(profiling and profiling.get("debug", False))
-
-    if step_idx == 1:
-        source = graph_collection["triads"]
-    else:
-        if not current_filtered_cross_combos:
-            raise RuntimeError("current_filtered_cross_combos is empty")
-        source = current_filtered_cross_combos
-
-    num_items = len(source)
-    chunks = [source[i:i + max_chunks] for i in range(0, num_items, max_chunks)]
-
-    new_filtered_cross_combos = []
-    all_step_graphs = []
-
-    if debug:
-        step_profile = {
-            "step": step_idx,
-            "num_items": num_items,
-            "num_chunks": len(chunks),
-            "chunks": [],       # lista de dicts, um por chunk
-            "time_sec": None,   # preenchido no final
-            "mem_before_mb": None,
-            "mem_after_mb": None,
-        }
-        step_mem_before = get_memory_usage_mb()
-        step_time_start = time.perf_counter()
-        print(f"[DEBUG] Step {step_idx} started. Memory: {step_mem_before:.2f} MB")
-
-    else:
-        step_profile = None
-
-    for chunk_idx, chunk_triads in enumerate(chunks):
-        if debug:
-            chunk_time_start = time.perf_counter()
-            chunk_mem_before = get_memory_usage_mb()
-            print(f"[DEBUG]   Chunk {chunk_idx}: started. "
-                  f"Memory before: {chunk_mem_before:.2f} MB. "
-                  f"Chunk size: {len(chunk_triads)}")
-
-        rebuilt_combos, final_graphs = process_chunk(
-            step_idx=step_idx,
-            chunk_idx=chunk_idx,
-            chunk_triads=chunk_triads,
-            graph_data=graph_data,
-            global_state=global_state,
-        )
-
-        if isinstance(rebuilt_combos, list):
-            new_filtered_cross_combos.extend(rebuilt_combos)
-        elif rebuilt_combos is not None:
-            new_filtered_cross_combos.append(rebuilt_combos)
-
-        all_step_graphs.extend(final_graphs)
-
-        if debug:
-            chunk_time_end = time.perf_counter()
-            chunk_mem_after = get_memory_usage_mb()
-
-            print(f"[DEBUG]   Chunk {chunk_idx}: finished. "
-                  f"Time: {chunk_time_end - chunk_time_start:.3f}s. "
-                  f"Memory after: {chunk_mem_after:.2f} MB.")
-
-            chunk_profile = {
-                "chunk_idx": chunk_idx,
-                "num_triads_in_chunk": len(chunk_triads),
-                "time_sec": chunk_time_end - chunk_time_start,
-                "mem_before_mb": chunk_mem_before,
-                "mem_after_mb": chunk_mem_after,
-            }
-            step_profile["chunks"].append(chunk_profile)
-
-
-    if debug:
-        step_time_end = time.perf_counter()
-        step_mem_after = get_memory_usage_mb()
-
-
-        print(f"[DEBUG] Step {step_idx} finished. "
-              f"Total time: {step_time_end - step_time_start:.3f}s. "
-              f"Final memory: {step_mem_after:.2f} MB\n")
-
-        step_profile["time_sec"] = step_time_end - step_time_start
-        step_profile["mem_before_mb"] = step_mem_before
-        step_profile["mem_after_mb"] = step_mem_after
-
-        profiling["steps"].append(step_profile)
-
-    return new_filtered_cross_combos, all_step_graphs
-
-def process_chunk(step_idx, chunk_idx, chunk_triads, graph_data, global_state):
-    config = global_state["config"]
-    dm_thresh = global_state["dm_thresh"]
-    inv_maps = global_state["inv_maps"]
-    metadata = global_state["metadata"]
-    maps = global_state["maps"]
-    matrices_dict = global_state["matrices_dict"]
-    steps = global_state["steps"]
-
-    max_chunks = config["max_chunks"]
-
-    if step_idx == 1:
-        log.debug(f"[step {step_idx}] Creating combos | Chunk: {chunk_idx}")
-        cross_combos = cross_protein_triads(chunk_triads, config["distance_diff_threshold"])
-        log.info(f"[step {step_idx}] Created {len(cross_combos)}")
-        filtered_combos = cross_combos["full"]
-        # filtered_combos = filter_cross_combos(
-        #     cross_combos,
-        #     graph_data,
-        #     distance_std_threshold=config["distance_std_threshold"],
-        #     roles_to_check=("UC","CW", "UW"),
-        #     offset=chunk_idx * max_chunks,
-        # )
-        # log.info(f"[step {step_idx}] Filtered {len(cross_combos['full'])-len(filtered_combos)} | {len(cross_combos['full'])} | {len(filtered_combos)}")
-    else:
-        log.debug(f"[step {step_idx}] Creating combos (no distances) | Chunk: {chunk_idx}")
-        cross_combos = cross_protein_triads(chunk_triads, config["distance_diff_threshold"], check_distances=False)
-        filtered_combos = cross_combos["full"]
-
-    triad_graph = build_graph_from_filtered_combos(filtered_combos)
-    tuple_edges = [tuple(edge) for edge in triad_graph]
-    G = nx.Graph()
-    G.add_edges_from(tuple_edges)
-
-    for comp in list(nx.connected_components(G)):
-        if len(comp) == 3:
-            G.remove_nodes_from(comp)
-
-    components = list(nx.connected_components(G))
-
-    index_offset_base = chunk_idx * (max_chunks ** step_idx)
-    maps["inv_maps"] = inv_maps
-
-    Frames_comp = set()
-    final_graphs = []
-
-    comp_id = 1
-    processed_status = 1
-    num_components = len(components)
-
-    for component in components:
-        len_component = len(component)
-        log.debug(
-            f"[{step_idx}] {comp_id}: Processing component "
-            f"{processed_status}/{num_components} with {len_component} nodes"
-        )
-        processed_status += 1
-
-        if len_component <= 4:
-            log.debug(
-                f"[{step_idx}] {comp_id} Skipping component "
-                f"{processed_status-1}, because it has just {len_component} nodes"
-            )
-            comp_id += 1
-            continue
-
-
-        subG = G.subgraph(component).copy()
-
-        dm_thresh_graph = np.zeros((metadata["total_length"], metadata["total_length"]))
-        log.debug(f"[{step_idx}] Creating dm_thresh_graph matrices...")
-        for u, v in subG.edges():
-            for p, (res_u, res_v) in enumerate(zip(u, v)):
-                if res_u != res_v:
-                    split_res_u, split_res_v = res_u.split(":"), res_v.split(":")
-                    res_u_tuple = (split_res_u[0], split_res_u[2], split_res_u[1])
-                    res_v_tuple = (split_res_v[0], split_res_v[2], split_res_v[1])
-                    idx_u = inv_maps[p+index_offset_base][res_u_tuple]
-                    try:
-                        idx_v = inv_maps[p+index_offset_base][res_v_tuple]
-                    except Exception as e:
-                        raise Exception(
-                            f"Problem at the protein {p}, offset: {index_offset_base}, "
-                            f"v tuple: {res_v_tuple}, step: {step_idx}, "
-                            f"chunk_idx: {chunk_idx}, comp_id: {comp_id}\nError: {e}"
-                        )
-                    dm_thresh_graph[idx_u, idx_v] = dm_thresh[idx_u, idx_v]
-                    dm_thresh_graph[idx_v, idx_u] = dm_thresh[idx_v, idx_u]
-
-        save(f"comp_id_{comp_id}", "dm_thresh_graph", dm_thresh_graph)
-        matrices_dict["dm_thresholded"] = dm_thresh_graph
-
-        nodes = list(subG.nodes())
-        nodes_indices = []
-
-        for node in nodes:
-            node_converted = []
-            for k, res in enumerate(node):
-                res_split = res.split(":")
-                res_tuple = (res_split[0], res_split[2], res_split[1])
-                res_indice = inv_maps[k+index_offset_base][res_tuple]
-                node_converted.append(res_indice)
-            nodes_indices.append(node_converted)
-
-        save(f"comp_id_{comp_id}", "nodes_indices", nodes_indices)
-        log.debug(f"[{step_idx}] {comp_id} Creating the std_matrix...")
-        matrices_mul, maps_mul = create_std_matrix(
-            nodes=nodes_indices,
-            matrices=matrices_dict,
-            maps=maps,
-            threshold=config["distance_std_threshold"]
-        )
-
-        log.debug(f"[{step_idx}] {comp_id} Finished creating the std_matrix.")
-
-        save(f"comp_id_{comp_id}", "matrices_mul", matrices_mul)
-        save(f"comp_id_{comp_id}", "maps_mul", maps_mul)
-        
-        debugar_ = True if len(nodes) > 300 else False
-
-        tracer = TraversalTracer(
-            out_dir="viz_runs",
-            fmt="mp4",
-            fps=12,
-            sample_every=50,
-            max_frames=2000,
-            dpi=110,
-            enabled=True
-        )
-
-        if not debugar_:
-            tracer.enabled = False
-        
-        end = True if step_idx == steps else False
-        frames, union_graph, error = generate_frames(
-            component_graph=subG,
-            matrices=matrices_mul,
-            maps=maps_mul,
-            len_component=len_component,
-            chunk_id=chunk_idx,
-            step=step_idx,
-            debug=debugar_,
-            tracer=tracer,
-            nodes=nodes,
-            end=end
-        )
-
-        if len(frames.keys()) > 1:
-            if step_idx < steps:
-                Frames_comp = Frames_comp.union(union_graph["edges_residues"])
-            else:
-                final_graphs.append(
-                    (create_graph(frames, typeEdge="edges_residues", comp_id=comp_id), comp_id)
-                )
-        else:
-            log.debug("Component Refused")
-
-        comp_id += 1
-
-    if step_idx < steps:
-        tuple_edges_frames = [tuple(edge) for edge in Frames_comp]
-        Graph_union_frames = nx.Graph()
-        Graph_union_frames.add_edges_from(tuple_edges_frames)
-
-        rebuilt_combos = rebuild_filtered_combos(filtered_combos, Graph_union_frames)
-    else:
-        rebuilt_combos = None
-
-    return rebuilt_combos, final_graphs
-
-
 def association_product(graph_data: list,
                         config: dict,
                         debug: bool = True) -> Union[Dict[str, List], None]:
     logger = logging.getLogger("association.association_product")
-
-    profiling = {
-        "debug": debug,
-        "steps": [] 
-    }
+    
     checks = config.get("checks", {"rsa": True, "depth": True})
     classes = config.get("classes", {})
     max_chunks = config.get("max_chunks", 5)
-
-    dynamic_dist = config.get("dynamic_distance_classes", False)
-    distance_bins = config.get("distance_bins", 5)
-    edge_threshold = config.get("edge_threshold", 10.0)
-    output_path = config.get("output_path", "./outputs")
-
-    # If dynamic distance classes are enabled, build them BEFORE triads
-    if dynamic_dist:
-        logger.info("Building dynamic distance classes from all contact maps...")
-        all_dists = collect_all_distances(graph_data, edge_threshold=edge_threshold)
-        if all_dists.size == 0:
-            logger.warning("No distances found for dynamic binning; falling back to standard binning.")
-        else:
-            distance_classes = build_dynamic_distance_classes(
-                all_dists=all_dists,
-                n_bins=distance_bins,
-                edge_threshold=edge_threshold,
-            )
-            if distance_classes:
-                # Attach to classes so find_triads can use it via classes["distance"]
-                classes["distance"] = distance_classes
-                config["classes"] = classes  # keep config in sync
-                logger.info(f"Dynamic distance classes created: {len(distance_classes)} bins.")
-                # Optional: plot distribution
-                plot_distance_distribution(
-                    all_dists=all_dists,
-                    classes=distance_classes,
-                    output_path=output_path,
-                    filename="distance_distribution.png",
-                )
-                logger.info(f"Distance distribution plot saved to {output_path}/distance_distribution.png")
-            else:
-                logger.warning("Dynamic distance classes ended up empty; this should not happen.")
 
     depths = []
     if checks["depth"]:
@@ -1953,7 +1891,7 @@ def association_product(graph_data: list,
     
     logger.info("Creating pruned and thresholded arrays...")
     matrices_dict, maps = filter_maps_by_nodes(filter_input,
-                                            distance_threshold=config["edge_threshold"],
+                                            distance_threshold=config["centroid_threshold"],
                                             matrices_dict=matrices_dict)
     logger.info("Arrays created successfully!")
 
@@ -1999,218 +1937,175 @@ def association_product(graph_data: list,
     qtd_graphs = len(graph_collection["graphs"])
     n = qtd_graphs
 
-    steps = 0
+    passos = 0
     while n > 1:
         n = (n + max_chunks - 1) // max_chunks  
-        steps += 1
-
+        passos += 1
+    
     filtered_cross_combos = []
-    final_graphs = []
+    for passo in range(1, passos+1):
+        log.debug(f"Executando o passo {passo}")
+        if passo == 1:
+            chunks_triads = [graph_collection["triads"][i:i+max_chunks] for i in range(0, qtd_graphs, max_chunks)]
+            # input(f"Chunks_triads: {len(chunks_triads)}")
+            cross_combos_list = [cross_protein_triads(chunk_triad, 1.0) for i, chunk_triad in enumerate(chunks_triads) if not print(f"Creating combo | Chunk: {i}")]
+            
+            # input(f"Cross_combos_list: {len(cross_combos_list)}")
+            filtered_combos_list = [filter_cross_combos(
+                    cross_combos,
+                    graph_data,
+                    distance_diff_threshold=2,
+                    roles_to_check=("UC","CW", "UW"),
+                    offset = i*max_chunks
+                    ) for i, cross_combos in enumerate(cross_combos_list) if not print(f"Filtering the combo | Chunk: {i}")]
+            # input(f"FIltered combos list: {len(filtered_combos_list)}")
+        else:
+            if not filtered_cross_combos:
+                raise Exception("Filtered Cross Combos is empty")
+            qtd_graphs = len(filtered_cross_combos)
+            chunk_triads = [filtered_cross_combos[i:i+max_chunks] for i in range(0, qtd_graphs, max_chunks)]
+            filtered_combos_list = [cross_protein_triads(chunk_triad, 1.0, check_distances=False)["full"] for i, chunk_triad in enumerate(chunk_triads) if not print(f"Creating | Combo Chunk: {i}") ] 
 
-    for step_idx in range(1, steps + 1):
-        log.debug(f"Executing step {step_idx}")
-        filtered_cross_combos, step_graphs = execute_step(
-            step_idx,
-            graph_collection,
-            max_chunks,
-            filtered_cross_combos,
-            graph_data=graph_data,
-            global_state={
-                "dm_thresh": dm_thresh,
-                "inv_maps": inv_maps,
-                "metadata": metadata,
-                "maps": maps,
-                "matrices_dict": matrices_dict,
-                "config": config,
-                "steps": steps,
-                "profiling": profiling
-            }
-        )
+        triad_graph_list = [build_graph_from_filtered_combos(filtered_combos) for filtered_combos in filtered_combos_list]
+        tuple_edges_list = [[tuple(edge) for edge in triad_graph] for triad_graph in triad_graph_list]
+        Graphs_list = []
+        for i, tuple_edge in enumerate(tuple_edges_list):
+            G = nx.Graph()
+            G.add_edges_from(tuple_edge)
 
-        if step_idx == steps:
-            final_graphs.extend(step_graphs)
+            for comp in list(nx.connected_components(G)):
+                if len(comp) == 3:
+                    G.remove_nodes_from(comp)
+            Graphs_list.append((i, G))
 
+        components_list = [(G[0], list(nx.connected_components(G[1]))) for G in Graphs_list]
+
+        Graphs_frames = []
+        for comps_idx, components in components_list:
+            index_offset = comps_idx * (max_chunks**passo)
+            comp_id = 1
+            processed_status = 1
+            maps["inv_maps"] = inv_maps
+            components_len = len(components)
+            nodes_qtds = [len(comp) for comp in components]
+            start_frame = time.perf_counter()
+            G = Graphs_list[comps_idx][1]
+            Graphs = [([G], 0)]
+
+            Frames_comp = set()
+            # input(f"Quantidade de components: {components_len} | Tamanho cada comp: {nodes_qtds}")
+            for component in components:
+                len_component = len(component)
+                log.debug(f"{comp_id}: Processing component {processed_status} / {components_len} with {len_component} nodes")
+                processed_status += 1
+                if len_component <= 4: 
+                    log.debug(f"{comp_id} Skipping component {processed_status-1}, because it has just {len_component} nodes")
+                    continue
+                subG = nx.Graph()
+                subG.add_nodes_from(component)
+
+                for u in component:
+                    for v in G.neighbors(u):
+                        if v in component:
+                            subG.add_edge(u, v)
+
+                # if len(component) == 346:
+                #     input("Returning component 346")
+                #     return {
+                #         "AssociatedGraph": [([subG], 0)]
+                #     }
+
+                dm_thresh_graph = np.zeros((metadata["total_length"], metadata["total_length"]))
+                for u, v in subG.edges():
+                    for p, (res_u, res_v) in enumerate(zip(u, v)):
+                        if res_u != res_v:
+                            split_res_u, split_res_v = res_u.split(":"), res_v.split(":")
+                            res_u_tuple = (split_res_u[0], split_res_u[2], split_res_u[1])
+                            res_v_tuple = (split_res_v[0], split_res_v[2], split_res_v[1])
+                            idx_u = inv_maps[p+index_offset][res_u_tuple]
+                            try:
+                                idx_v = inv_maps[p+index_offset][res_v_tuple]
+                            except Exception as e:
+                                raise Exception(f"Problema na proteína {p}, offset: {index_offset}, v tuple: {res_v_tuple}, passo: {passo}, comps_idx: {comps_idx}, comp_id: {comp_id}\nError: {e}")
+                            dm_thresh_graph[idx_u, idx_v] = dm_thresh[idx_u, idx_v]
+                            dm_thresh_graph[idx_v, idx_u] = dm_thresh[idx_v, idx_u]
+
+                save(f"comp_id_{comp_id}", "dm_thresh_graph", dm_thresh)
+                matrices_dict["dm_thresholded"] = dm_thresh_graph
+
+                nodes = list(subG.nodes())
+                nodes_indices = []
+
+                for node in nodes:
+                    node_converted = []
+                    for k, res in enumerate(node):
+                        res_split = res.split(":")
+                        res_tuple = (res_split[0], res_split[2], res_split[1])
+                        res_indice = inv_maps[k+index_offset][res_tuple]
+                        node_converted.append(res_indice)
+                    nodes_indices.append(node_converted)
+
+                save(f"comp_id_{comp_id}", "nodes_indices", nodes_indices)
+
+                matrices_mul, maps_mul = create_std_matrix(
+                    nodes=nodes_indices,
+                    matrices=matrices_dict,
+                    maps=maps,
+                    threshold=config["distance_diff_threshold"]
+                )
+
+                save(f"comp_id_{comp_id}", "matrices_mul", matrices_mul)
+                save(f"comp_id_{comp_id}", "maps_mul", maps_mul)
+                
+                debugar_ = True if len(nodes) > 300 else False
+
+                tracer = TraversalTracer(
+                    out_dir="viz_runs",
+                    fmt="mp4",        # ou "mp4"
+                    fps=12,
+                    sample_every=50,  # amostragem para reduzir frames
+                    max_frames=2000,  # corta se passar disso
+                    dpi=110,
+                    enabled=True
+                )
+
+                if not debugar_: tracer.enabled=False
+
+                frames, union_graph, error = generate_frames(
+                    matrices=matrices_mul,
+                    maps=maps_mul,
+                    len_component=len_component,
+                    chunk_id=comps_idx,
+                    step=passo,
+                    debug=debugar_,
+                    tracer=tracer
+                )
+
+                if len(frames.keys()) > 1:
+                    
+                    if passo < passos: 
+                        Frames_comp = Frames_comp.union(union_graph["edges_residues"])
+                    else:
+                        Graphs.extend([(create_graph(frames, typeEdge="edges_residues", comp_id=comp_id), comp_id)])
+
+                    comp_id += 1
+                else:
+                    log.debug("Component Refused")
+            tuple_edges_frames = [tuple(edge) for edge in Frames_comp]
+
+            Graph_union_frames = nx.Graph()
+            Graph_union_frames.add_edges_from(tuple_edges_frames)
+            Graphs_frames.append((comps_idx, Graph_union_frames)) 
+
+        filtered_cross_combos = [rebuild_filtered_combos(filtered_combos, Graphs_frames[i][1]) for i, filtered_combos in enumerate(filtered_combos_list)]
     log.debug("Finished creating ALL Frames")
-    save("association_product", "Graphs", final_graphs)
-
-    if debug:
-        write_json_raw("profiling_report.json", profiling)
-        print("[DEBUG] Profiling report saved to association_product/profiling_report.json")
-
-    return {
-        "AssociatedGraph": final_graphs
-    }         
-    # filtered_cross_combos = []
-    # for step in range(1, steps+1):
-    #     log.debug(f"Executing the step {step}")
-    #     execute_step(step, graph_collection, max_chunks, qtd_graphs, config)
-
-    #     if passo == 1: 
-
-    #         chunks_triads = [graph_collection["triads"][i:i+max_chunks] for i in range(0, qtd_graphs, max_chunks)]
-    #         # input(f"Chunks_triads: {len(chunks_triads)}")
-    #         cross_combos_list = [cross_protein_triads(chunk_triad, 1.0) for i, chunk_triad in enumerate(chunks_triads) if not print(f"Creating combo | Chunk: {i}")]
-    #         
-    #         # input(f"Cross_combos_list: {len(cross_combos_list)}")
-    #         filtered_combos_list = [filter_cross_combos(
-    #                 cross_combos,
-    #                 graph_data,
-    #                 distance_std_threshold=2,
-    #                 roles_to_check=("UC","CW", "UW"),
-    #                 offset = i*max_chunks
-    #                 ) for i, cross_combos in enumerate(cross_combos_list) if not print(f"Filtering the combo | Chunk: {i}")]
-    #         # input(f"FIltered combos list: {len(filtered_combos_list)}")
-    #     else:
-    #         if not filtered_cross_combos:
-    #             raise Exception("Filtered Cross Combos is empty")
-    #         qtd_graphs = len(filtered_cross_combos)
-    #         chunk_triads = [filtered_cross_combos[i:i+max_chunks] for i in range(0, qtd_graphs, max_chunks)]
-    #         filtered_combos_list = [cross_protein_triads(chunk_triad, 1.0, check_distances=False)["full"] for i, chunk_triad in enumerate(chunk_triads) if not print(f"Creating | Combo Chunk: {i}") ] 
-
-    #     triad_graph_list = [build_graph_from_filtered_combos(filtered_combos) for filtered_combos in filtered_combos_list]
-    #     tuple_edges_list = [[tuple(edge) for edge in triad_graph] for triad_graph in triad_graph_list]
-    #     Graphs_list = []
-    #     for i, tuple_edge in enumerate(tuple_edges_list):
-    #         G = nx.Graph()
-    #         G.add_edges_from(tuple_edge)
-
-    #         for comp in list(nx.connected_components(G)):
-    #             if len(comp) == 3:
-    #                 G.remove_nodes_from(comp)
-    #         Graphs_list.append((i, G))
-
-    #     components_list = [(G[0], list(nx.connected_components(G[1]))) for G in Graphs_list]
-
-    #     Graphs_frames = []
-    #     for comps_idx, components in components_list:
-    #         index_offset = comps_idx * (max_chunks**passo)
-    #         comp_id = 1
-    #         processed_status = 1
-    #         maps["inv_maps"] = inv_maps
-    #         components_len = len(components)
-    #         nodes_qtds = [len(comp) for comp in components]
-    #         start_frame = time.perf_counter()
-    #         G = Graphs_list[comps_idx][1]
-    #         Graphs = [([G], 0)]
-
-    #         Frames_comp = set()
-    #         # input(f"Quantidade de components: {components_len} | Tamanho cada comp: {nodes_qtds}")
-    #         for component in components:
-    #             len_component = len(component)
-    #             log.debug(f"[{passo}] {comp_id}: Processing component {processed_status} / {components_len} with {len_component} nodes")
-    #             processed_status += 1
-    #             if len_component <= 4: 
-    #                 log.debug(f"[{passo}] {comp_id} Skipping component {processed_status-1}, because it has just {len_component} nodes")
-    #                 continue
-    #             subG = nx.Graph()
-    #             subG.add_nodes_from(component)
-
-    #             log.debug(f"[{passo}] {comp_id} Adding edges...")
-    #             for u in component:
-    #                 for v in G.neighbors(u):
-    #                     if v in component:
-    #                         subG.add_edge(u, v)
-
-    #             # if len(component) == 346:
-    #             #     input("Returning component 346")
-    #             #     return {
-    #             #         "AssociatedGraph": [([subG], 0)]
-    #             #     }
-
-    #             dm_thresh_graph = np.zeros((metadata["total_length"], metadata["total_length"]))
-    #             log.debug(f"[{passo}] Creating dm_thresh_graph matrices...")
-    #             for u, v in subG.edges():
-    #                 for p, (res_u, res_v) in enumerate(zip(u, v)):
-    #                     if res_u != res_v:
-    #                         split_res_u, split_res_v = res_u.split(":"), res_v.split(":")
-    #                         res_u_tuple = (split_res_u[0], split_res_u[2], split_res_u[1])
-    #                         res_v_tuple = (split_res_v[0], split_res_v[2], split_res_v[1])
-    #                         idx_u = inv_maps[p+index_offset][res_u_tuple]
-    #                         try:
-    #                             idx_v = inv_maps[p+index_offset][res_v_tuple]
-    #                         except Exception as e:
-    #                             raise Exception(f"Problema na proteína {p}, offset: {index_offset}, v tuple: {res_v_tuple}, passo: {passo}, comps_idx: {comps_idx}, comp_id: {comp_id}\nError: {e}")
-    #                         dm_thresh_graph[idx_u, idx_v] = dm_thresh[idx_u, idx_v]
-    #                         dm_thresh_graph[idx_v, idx_u] = dm_thresh[idx_v, idx_u]
-
-    #             save(f"comp_id_{comp_id}", "dm_thresh_graph", dm_thresh)
-    #             matrices_dict["dm_thresholded"] = dm_thresh_graph
-
-    #             nodes = list(subG.nodes())
-    #             nodes_indices = []
-
-    #             for node in nodes:
-    #                 node_converted = []
-    #                 for k, res in enumerate(node):
-    #                     res_split = res.split(":")
-    #                     res_tuple = (res_split[0], res_split[2], res_split[1])
-    #                     res_indice = inv_maps[k+index_offset][res_tuple]
-    #                     node_converted.append(res_indice)
-    #                 nodes_indices.append(node_converted)
-
-    #             save(f"comp_id_{comp_id}", "nodes_indices", nodes_indices)
-    #             log.debug(f"[{passo}] {comp_id} Creating the std_matrix...")
-    #             matrices_mul, maps_mul = create_std_matrix(
-    #                 nodes=nodes_indices,
-    #                 matrices=matrices_dict,
-    #                 maps=maps,
-    #                 threshold=config["distance_std_threshold"]
-    #             )
-
-    #             log.debug(f"[{passo}] {comp_id} Finished creating the std_matrix.")
-
-    #             save(f"comp_id_{comp_id}", "matrices_mul", matrices_mul)
-    #             save(f"comp_id_{comp_id}", "maps_mul", maps_mul)
-    #             
-    #             debugar_ = True if len(nodes) > 300 else False
-
-    #             tracer = TraversalTracer(
-    #                 out_dir="viz_runs",
-    #                 fmt="mp4",        # ou "mp4"
-    #                 fps=12,
-    #                 sample_every=50,  # amostragem para reduzir frames
-    #                 max_frames=2000,  # corta se passar disso
-    #                 dpi=110,
-    #                 enabled=True
-    #             )
-
-    #             if not debugar_: tracer.enabled=False
-
-    #             frames, union_graph, error = generate_frames(
-    #                 matrices=matrices_mul,
-    #                 maps=maps_mul,
-    #                 len_component=len_component,
-    #                 chunk_id=comps_idx,
-    #                 step=passo,
-    #                 debug=debugar_,
-    #                 tracer=tracer
-    #             )
-
-    #             if len(frames.keys()) > 1:
-    #                 
-    #                 if passo < passos: 
-    #                     Frames_comp = Frames_comp.union(union_graph["edges_residues"])
-    #                 else:
-    #                     Graphs.extend([(create_graph(frames, typeEdge="edges_residues", comp_id=comp_id), comp_id)])
-
-    #                 comp_id += 1
-    #             else:
-    #                 log.debug("Component Refused")
-    #         tuple_edges_frames = [tuple(edge) for edge in Frames_comp]
-
-    #         Graph_union_frames = nx.Graph()
-    #         Graph_union_frames.add_edges_from(tuple_edges_frames)
-    #         Graphs_frames.append((comps_idx, Graph_union_frames)) 
-
-    #     filtered_cross_combos = [rebuild_filtered_combos(filtered_combos, Graphs_frames[i][1]) for i, filtered_combos in enumerate(filtered_combos_list)]
-    # log.debug("Finished creating ALL Frames")
     # log.debug(f"Took {end_frame - start_frame:.6f} seconds to create ALL Frames")
     save("association_product", f"Graphs", Graphs)
 
     return {
             "AssociatedGraph": Graphs
         }
-def generate_frames(component_graph, matrices, maps, len_component, chunk_id, step, debug=False, debug_every=5000, tracer: TraversalTracer=None, nodes=None, end=False):
+def generate_frames(matrices, maps, len_component, chunk_id, step, debug=False, debug_every=5000, tracer: TraversalTracer=None):
     """
     Build frames by branching on coherent groups of the frontier.
 
@@ -2235,31 +2130,15 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
 
     N_adj = [np.nonzero(A[u])[0] for u in range(K)]  # Vizinhos por adjacência
 
-    if nodes is None:
-        nodes = list(component_graph.nodes())
-
-    if len(nodes) != K:
-        raise ValueError(
-            f"Mismatch between nodes ({len(nodes)}) and matrices size ({K}). "
-            "Check node ordering passed to create_std_matrix vs generate_frames."
-        )
-
-    node_to_idx = {node: idx for idx, node in enumerate(nodes)}
-
-    N_adj = [np.nonzero(A[u])[0] for u in range(K)]
-
     frames = {}
 
-    edges_base = set()
-    for u, v in component_graph.edges():
-        iu = node_to_idx[u]
-        iv = node_to_idx[v]
-        if iu == iv:
-            continue
-        edges_base.add(frozenset((iu, iv)))
-
+    # frame 0 base vetorizado
+    ii, jj = np.where(A)
+    m = ii < jj
+    edges_base = {frozenset((int(i), int(j))) for i, j in zip(ii[m], jj[m])}
     _, edges_idx_0, edges_res_0 = convert_edges_to_residues(edges_base, maps)
     frames[0] = {"edges_indices": edges_idx_0, "edges_residues": edges_res_0}
+
 
     def frontier_for(chosen: np.ndarray, inter_mask: np.ndarray) -> tuple:
         """
@@ -2411,14 +2290,13 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
 
     if debug: log.debug("Traversing nodes in descending order of degree ")
     for node_id, node in enumerate(order_all): # Percorremos os nós na ordem do maior grau para o menor grau
-        # if tracer and tracer.enabled:
-        #     # passa a matriz A do componente que você está explorando aqui; se for o grafo inteiro A, serve
-        #     tracer.start_anchor(anchor=int(node), A_sub=A, nodes_map=np.arange(A.shape[0], dtype=int))
+        if tracer and tracer.enabled:
+            # passa a matriz A do componente que você está explorando aqui; se for o grafo inteiro A, serve
+            tracer.start_anchor(anchor=int(node), A_sub=A, nodes_map=np.arange(A.shape[0], dtype=int))
         str_node = f"{node_id}/{len_order}"
         if debug: log.debug(f"Node: {str_node}") 
-        log.debug(f"[{str_node}] Making copy of inter list...")
+
         inter = C[int(node)].copy() # Primeiro começamos pegando a linha de coerência que representa o nó e fazemos uma cópia dela (para não modificar o original)
-        log.debug(f"[{str_node}] Copy finished")
         accepted = (int(node),) # Iniciamos os nós que serão percorridos com o próprio nó inicial
 
         neigh = N_adj[int(node)]
@@ -2430,10 +2308,8 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
         frontier_idx = neigh[inter[neigh]]
         if frontier_idx.size == 0:
             continue
-        
-        log.debug(f"[{str_node}] Transforming frontier to set...")
+
         frontier = set(int(v) for v in frontier_idx) # Lista da fronteira 
-        log.debug(f"[{str_node}] Finished transforming.")
 
         # Vamos criar um stack para realizar um busca em profundidade pelo LIFO (Last In First Out)
         stack = []
@@ -2461,16 +2337,13 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
         """
         if debug: log.debug(f"[{str_node}] Creating groups...")
         groups = expand_groups(accepted, inter, frontier)
-        if debug: log.debug(f"[{str_node}] Groups created: {len(groups)}")
+        if debug: log.debug(f"[{str_node}] Groups created: {groups}")
         # print(groups)
-        if debug: log.debug(f"[{str_node}] Adding to tracer...")
-        # if tracer and tracer.enabled:
-        #     tracer.tick(current=int(node), chosen=accepted, frontier=frontier)
-
         if debug: log.debug(f"[{str_node}] Adding to stack...")
+        if tracer and tracer.enabled:
+            tracer.tick(current=int(node), chosen=accepted, frontier=frontier)
 
-        for i, (sig, chosen_g, inter_g, frontier_g) in enumerate(groups):
-            log.debug(f"[{str_node}] {i}/{len(groups)} group")
+        for sig, chosen_g, inter_g, frontier_g in groups:
             # Evitamos revisitar exatamente o mesmo estado (mesmo conjunto escolhido, mesma máscara e mesma fronteira),
             # o que previne ciclos e explosão desnecessária de busca.
             if sig in visited_states:
@@ -2479,7 +2352,7 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
                 continue
             visited_states.add(sig)
             added = tuple(sorted(set(chosen_g) - set(accepted)))
-
+            # Empilhamos o novo estado completo para exploração em profundidade.
             stack.append((chosen_g, inter_g, frontier_g, added))
             stack_small.append((chosen_g, frontier_g))
             pushes += 1
@@ -2495,10 +2368,10 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
             str_stack = f"{str_node}|{current_stack}"
             if debug: log.debug(f"[{str_node}] Current stack: {current_stack}")
             chosen_t, inter_m, frontier_t, added_t = stack.pop()
-            # if tracer and tracer.enabled:
-            #     tracer.tick(current=added_t if added_t else (),
-            #                 chosen=chosen_t,
-            #                 frontier=frontier_t)
+            if tracer and tracer.enabled:
+                tracer.tick(current=added_t if added_t else (),
+                            chosen=chosen_t,
+                            frontier=frontier_t)
             pops += 1
             chosen = list(chosen_t)
             frontier = set(frontier_t)
@@ -2539,11 +2412,11 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
                             edge_key = frozenset(tuple(sorted(e)) for e in es)
                             if edge_key not in seen_edge_sets:                       
                                 seen_edge_sets.add(edge_key)
-                                # if tracer and tracer.enabled:
-                                #     tracer.tick(current=None,
-                                #                 chosen=chosen,
-                                #                 frontier=(),
-                                #                 accepted_edges_latest=es)
+                                if tracer and tracer.enabled:
+                                    tracer.tick(current=None,
+                                                chosen=chosen,
+                                                frontier=(),
+                                                accepted_edges_latest=es)
                                 if debug: log.debug(f"[{str_stack}] Converting edges...")
                                 _, edges_idx, edges_res = convert_edges_to_residues(es, maps)
                                 if debug: log.debug(f"[{str_stack}] Conversion finished.")
@@ -2569,11 +2442,11 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
                     # return _, _, True
             if to_break:
                 break
-        log.debug(f"[{str_node}] Finished while stack.")
-        # if tracer and tracer.enabled:
-        #     out_file = tracer.end_anchor(name_prefix=f"chunk{chunk_id}_step{step}_anchor{int(node)}")
-        #     if debug and out_file:
-        #         log.debug(f"[{str_node}][viz] salvo: {out_file}")
+
+        if tracer and tracer.enabled:
+            out_file = tracer.end_anchor(name_prefix=f"chunk{chunk_id}_step{step}_anchor{int(node)}")
+            if debug and out_file:
+                log.debug(f"[{str_node}][viz] salvo: {out_file}")
 
     
     if debug: log.debug("Sorting frames...")
@@ -2689,10 +2562,7 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
     #     kept_edge_sets.append(es)
     #     fid_out += 1
 
-    if end:
-        final_frames = filter_subframes(frames, debug=debug)
-    else:
-        final_frames = frames
+    final_frames = filter_subframes(frames, debug=True)
 
     # log.debug(f"[done] frames_out={len(final_frames)} "
                 # f"(accepted_raw={len(others)}, kept_maximal={len(final_frames)-1})")
