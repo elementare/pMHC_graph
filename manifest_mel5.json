@@ -4,16 +4,18 @@
     "output_path": "data/pdb_mel_analysis_classes",
     "debug": true,
     "track_steps": false,
-    "centroid_threshold": 10,
-    "centroid_granularity": "ca_only",
+    "node_threshold": 10,
+    "node_granularity": "ca_only",
     "exclude_waters": false,
-    "check_rsa": false,
+    "triad_rsa": false,
     "check_depth": false,
     "rsa_filter": 0.1,
     "depth_filter": 10.0,
-    "distance_diff_threshold": {"A": 2.0, "C": 3.0},
+    "_distance_std_threshold": {"A": 2.0, "C": 3.0},
+    "distance_std_threshold": 3.0,
+    "distance_diff_threshold": 2.0,
     
-    "distance_bins": 5,
+    "distance_bin_width": 2,
     "rsa_bins": 3,
     "depth_bins": 5,
 
@@ -36,12 +38,12 @@
       "path": "/home/elementare/GithubProjects/pMHC_graph/Analysis/processed_pdbs",
       "enable_tui": false,
       "extensions": [".pdb", ".cif"],
-      "constrains": [
+      "selectors": [
         { "name": "MHC1" }
       ]
     }
   ],
-  "constrains": {
+  "selectors": {
     "MHC1": {
       "chains": ["C"],
       "residues": {

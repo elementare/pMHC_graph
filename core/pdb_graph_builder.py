@@ -362,7 +362,7 @@ class PDBGraphBuilder:
     def _centroid_mask_for_group(self, g: pd.DataFrame) -> pd.Series:
         """
         Return a boolean mask selecting which atoms of a residue group `g` are
-        used to compute the centroid, according to `config.centroid_granularity`.
+        used to compute the centroid, according to `config.node_granularity`.
 
         Notes
         -----
@@ -514,7 +514,7 @@ class PDBGraphBuilder:
 
         Granularity
         -----------
-        Controlled by `self.config.centroid_granularity`:
+        Controlled by `self.config.node_granularity`:
           - "all_atoms": all heavy atoms (element != 'H').
           - "backbone": heavy backbone atoms only (N, CA, C, O, OXT).
           - "side_chain": heavy side-chain atoms only; fallback to CA/CB if empty.

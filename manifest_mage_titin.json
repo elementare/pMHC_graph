@@ -4,15 +4,18 @@
     "output_path": "data/magextitin",
     "debug": true,
     "track_steps": false,
-    "centroid_threshold": 10.0,
-    "centroid_granularity": "ca_only",
+    "edge_threshold": 10.0,
+    "node_granularity": "ca_only",
     "exclude_waters": true,
-    "check_rsa": false,
+    "triad_rsa": false,
     "check_depth": false,
     "rsa_filter": 0.1,
     "depth_filter": 10.0,
-    "distance_diff_threshold": 3.0,
-
+    "distance_diff_threshold": 2.0,
+    "distance_std_threshold": 3.0,
+    "distance_bin_width": 2.0,
+    "dynamic_distance_classes": true,
+    "filter_triads_by_chain": ["C"],
     "distance_bins": 3,
     "rsa_bins": 3,
     "depth_bins": 3,
@@ -35,10 +38,13 @@
     {
       "path": ["pdb_input/"],
       "enable_tui": true,
-      "extensions": [".pdb", ".pdb.gz", ".cif"] 
+      "extensions": [".pdb", ".pdb.gz", ".cif"], 
+      "selectors": [
+        { "name": "MHC1" }
+      ]
     }
   ],
-  "constrains": {
+  "selectors": {
     "MHC1": {
       "chains": ["C"],
       "residues": {

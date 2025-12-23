@@ -23,37 +23,6 @@ import os
 logger = logging.getLogger("Preprocessing")
 
 
-# def remove_water_from_pdb(source_file, dest_file):
-#     """Remove water molecules (HOH) from a PDB file and save the cleaned version."""
-    
-#     if path.exists(dest_file):
-#         logger.debug(f"The file {dest_file} already exists.")
-#     else:
-#         suffix = source_file.lower()
-#         if suffix.endswith((".cif", ".mmcif", ".mcif")):
-#             parser = MMCIFParser(QUIET=True)
-#         else:
-#             parser = PDBParser(QUIET=True)
-#         structure = parser.get_structure("protein", source_file)
-                
-#         class NoWaterSelect(PDB.Select):
-#             def accept_residue(self, residue):
-#                 if hasattr(residue, "get_resname"):
-#                     return residue.get_resname() != "HOH"
-#                 else:
-#                     return True
-        
-#         dst_lower = dest_file.lower()
-#         if dst_lower.endswith((".cif", ".mmcif", ".mcif")):
-#             io = MMCIFIO()
-#             io.set_structure(structure)
-#             io.save(dest_file, select=NoWaterSelect())
-#         else:
-#             io = PDBIO()
-#             io.set_structure(structure)
-#             io.save(dest_file, select=NoWaterSelect())
-#         logger.debug(f"Saved cleaned PDB file: {dest_file}")
-
 def remove_water_from_pdb(source_file, dest_file):
     """Remove water molecules from a PDB or mmCIF file and save the cleaned version safely."""
     
@@ -325,13 +294,13 @@ def resolve_selection_params_for_file(file_path: Path, manifest: Dict[str, Any])
         if not hit_path:
             continue
 
-        for c in (rule.get("constrains") or []):
+        for c in (rule.get("selectors") or []):
             name = c.get("name")
             if not name:
                 continue
             if not _name_contains(fname, c.get("file_name_contains")):
                 continue
-            spec = manifest.get("constrains", {}).get(name, {})
+            spec = manifest.get("selectors", {}).get(name, {})
             merged = _merge_constraints(merged, spec)
     return merged
 
@@ -347,8 +316,8 @@ def create_graphs(manifest: Dict) -> List[Tuple]:
         raise Exception("Nenhum arquivo selecionado a partir do manifest")
 
     graph_config = make_default_config(
-        centroid_threshold=S["centroid_threshold"],
-        granularity=S["centroid_granularity"],
+        edge_threshold=S["edge_threshold"],
+        granularity=S["node_granularity"],
         exclude_waters=S["exclude_waters"],
         dssp_acc_array=S["rsa_table"]
     )

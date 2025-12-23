@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import shutil
 import sys
 from os import path
 from cli.cli_parser import parse_args
@@ -19,33 +20,45 @@ def load_manifest(manifest_path: str) -> Dict[str, Any]:
 
     data.setdefault("settings", {})
     data.setdefault("inputs", [])
-    data.setdefault("constrains", {})
+    data.setdefault("selectors", {})
 
     S = data["settings"]
     S.setdefault("run_name", "test")
     S.setdefault("output_path", "./outputs")
+
+    os.makedirs(S["output_path"], exist_ok=True)
+    
+    shutil.copy2(manifest_path, S["output_path"]+"/manifest.json")
     S.setdefault("debug", False)
     S.setdefault("track_steps", False)
     S.setdefault("rsa_table", "Wilke")
 
-    S.setdefault("centroid_threshold", 8.5)
-    S.setdefault("centroid_granularity", "all_atoms")
+    S.setdefault("edge_threshold", 8.5)
+    S.setdefault("close_tolerance", 1.0)
+    S.setdefault("node_granularity", "all_atoms")
     S.setdefault("exclude_waters", True)
 
-    S.setdefault("check_rsa", True)
-    S.setdefault("check_depth", True)
+    S.setdefault("triad_rsa", False)
+    S.setdefault("check_depth", False)
 
     S.setdefault("rsa_filter", 0.1)
     S.setdefault("depth_filter", 10.0)
 
-    S.setdefault("distance_diff_threshold", 2.0)
+    S.setdefault("distance_std_threshold", 3.0)
+    S.setdefault("distance_diff_threshold", 1.0)
 
     S.setdefault("rsa_bins", 5)
+    S.setdefault("distance_bin_width", 2.0)
     S.setdefault("depth_bins", 5)
+
+    S.setdefault("dynamic_distance_classes", False)
     S.setdefault("distance_bins", 5)
+    # S.setdefault("distance_bins", 5)
 
     S.setdefault("serd_config", None)
     S.setdefault("max_chunks", 5)
+
+    S.setdefault("filter_triads_by_chain", None)
     S.setdefault("classes", {})
 
 
@@ -77,24 +90,30 @@ def main():
 
     checks = {
         "depth": S.get("check_depth"),
-        "rsa":   S.get("check_rsa"),
+        "rsa":   S.get("triad_rsa"),
     }
 
     graphs = create_graphs(manifest)
 
     association_config = {
-        "centroid_threshold":          S.get("centroid_threshold"),
+        "edge_threshold":          S.get("edge_threshold"),
+        "distance_std_threshold":     S.get("distance_std_threshold"),
         "distance_diff_threshold":     S.get("distance_diff_threshold"),
         "rsa_filter":                  S.get("rsa_filter"),
         "depth_filter":                S.get("depth_filter"),
         "rsa_bins":                    S.get("rsa_bins"),
         "depth_bins":                  S.get("depth_bins"),
-        "distance_bins":               S.get("distance_bins"),
+        "distance_bin_width":         S.get("distance_bin_width"),
+        "close_tolerance":             S.get("close_tolerance"),
         "checks":                      checks,
         "exclude_waters":              S.get("exclude_waters"),
         "classes": S.get("classes", {}),
         "max_chunks": S.get("max_chunks"),
-        "rsa_table": S.get("rsa_table", "Wilke")
+        "rsa_table": S.get("rsa_table", "Wilke"),
+        "dynamic_distance_classes": S.get("dynamic_distance_classes", False),
+        "distance_bins":           S.get("distance_bins", 5),
+        "filter_triads_by_chain": S.get("filter_triads_by_chain", None),
+        "output_path":             output_path
     }
 
     G = AssociatedGraph(
