@@ -3,7 +3,6 @@ import logging
 import json
 from pathlib import Path
 from io_utils.pdb_io import list_pdb_files, get_user_selection
-from SERD_Addon.classes import StructureSERD
 from collections import defaultdict
 from os import path
 from Bio import PDB
@@ -118,47 +117,6 @@ def get_exposed_residues(graph: Graph, rsa_filter=0.1, depth_filter: Union[float
             return s_graph
     
     raise Exception("I didn't find any nodes that passes in your filter")        
-
-def calculate_residue_depth(pdb_file_path, serd_config=None):
-    default_config = {
-        "vdw": None,
-        "step": 0.6,
-        "probe": 1.4,
-        "type": "SES",
-        "keep_only_interface": False,
-        "ignore_backbone": False,
-        "metric": "minimum"
-    }
-    
-    config = defaultdict(lambda: None, default_config)
-    
-    if isinstance(serd_config, str):
-        with open(serd_config, "r") as f:
-            config.update(json.load(f))
-    elif isinstance(serd_config, dict):
-        config.update(serd_config)
-    
-    print("Loading structure")
-    structure = StructureSERD(vdw=config["vdw"])
-    structure.load(pdb_file_path)
-     
-    print("Creating model surface")
-    structure.model_surface(
-        type=config["type"],
-        step=config["step"],
-        probe=config["probe"]
-    )
-    
-    print("Calculating depth")
-    depth = structure.residue_depth(
-        metric=config["metric"],
-        keep_only_interface=config["keep_only_interface"],
-        ignore_backbone=config["ignore_backbone"]
-    )
-    depth_value = depth["ResidueDepth"]
-    depth["ResidueDepth"] = (depth_value - np.min(depth_value)) / (np.max(depth_value) - np.min(depth_value))
-    
-    return depth
 
 def _is_within(child: Path, parent: Path) -> bool:
     """True se child está dentro de parent (ou igual)."""
@@ -344,18 +302,7 @@ def create_graphs(manifest: Dict) -> List[Tuple]:
 
         graph_instance = Graph(config=graph_config, graph_path=str(graph_path))
 
-        if S["check_depth"]:
-            start_time = time.time()
-            depth = calculate_residue_depth(
-                pdb_file_path=str(graph_path),
-                serd_config=S.get("serd_config"),
-            )
-            logger.debug(f"Depth calculated in {time.time() - start_time} seconds")
-            depth["ResNumberChain"] = depth["ResidueNumber"].astype(str) + depth["Chain"]
-            graph_instance.depth = depth
-        else:
-            depth = None
-
+        depth = None
         selection_params = resolve_selection_params_for_file(orig_path, manifest)
 
         subgraph = get_exposed_residues(

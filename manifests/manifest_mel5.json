@@ -1,7 +1,7 @@
 {
   "settings": {
     "run_name": "mel_5",
-    "output_path": "data/pdb_mel_analysis_classes",
+    "output_path": "data/pdb_mel_relatorio",
     "debug": true,
     "track_steps": false,
     "node_threshold": 10,
@@ -19,9 +19,8 @@
     "rsa_bins": 3,
     "depth_bins": 5,
 
-    "serd_config": null,
 
-    "classes": {
+    "_classes": {
       "residues": {
         "HID": ["ALA", "VAL", "LEU", "ILE", "MET"],
         "POL": ["SER", "THR", "ASN", "GLN", "CYS"],
@@ -36,7 +35,7 @@
   "inputs": [
     {
       "path": "/home/elementare/GithubProjects/pMHC_graph/Analysis/processed_pdbs",
-      "enable_tui": false,
+      "enable_tui": true,
       "extensions": [".pdb", ".cif"],
       "selectors": [
         { "name": "MHC1" }
