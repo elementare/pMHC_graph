@@ -138,20 +138,9 @@ class AssociatedGraph:
         Initialize an AssociatedGraph instance with a reduced configuration.
         
         :param graphs: List of tuples (Graph instance, raw_data) from preprocessing.
-        :param reference_graph: Identifier for the reference graph.
         :param output_path: Where to save results.
         :param run_name: Unique run identifier.
-        :param association_mode: "identity" or "similarity".
-        :param association_config: Dictionary with keys:
-                - centroid_threshold (float)
-                - neighbor_similarity_cutoff (float)
-                - rsa_similarity_threshold (float)
-                - depth_similarity_threshold (float)
-                - residues_similarity_cutoff (float)
-                - angle_diff (float)
-                - checks (dict)
-                - factors_path (str or None)
-                - residues_path (str or None)
+        :param association_config: Dictionary with keys.
         """
         self.association_config = association_config
         self.track_residues = self.association_config.get("track_residues", None)

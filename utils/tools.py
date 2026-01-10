@@ -223,6 +223,7 @@ def indices_graphs(nodes_lists: List[List]) -> List[Tuple[int, int]]:
         current += length
     return ranges
 
+
 def value_to_class(
     value: float,
     bin_width: float,        # Fixed size of each division
@@ -237,11 +238,11 @@ def value_to_class(
       - Bins: (L, R] spaced by bin_width. Last bin may be smaller than bin_width.
       - Uncertainty: half of the bin_width.
       - If |value - center_of_bin| <= close_tolerance, returns [class_index].
-      - Otherwise, returns all classes whose bins intersect with [value - unc, value + inc].
+      - Otherwise, returns all classes whose bins intersect with [value - inc, value + inc].
 
     Inverse:
       - Domain: [threshold, upper_bound]
-      - Maps to a single class index based on bin_width.
+      - Same multi-class behavior as non-inverse, but bins live on [threshold, upper_bound].
     """
     if bin_width <= 0:
         return None
@@ -253,28 +254,25 @@ def value_to_class(
 
         # Calculate total number of divisions
         n_divisions = math.ceil(threshold / bin_width)
-        
+
         # Identify the primary bin index (1-based)
         i = math.ceil(value / bin_width)
         i = max(1, min(i, n_divisions))
 
-        # Calculate the actual boundaries of the current bin 
-        # (important if the last bin is smaller than bin_width)
+        # Actual bin boundaries (last bin may be smaller)
         current_bin_left = (i - 1) * bin_width
         current_bin_right = min(i * bin_width, threshold)
         current_bin_actual_width = current_bin_right - current_bin_left
-        
+
         bin_center = current_bin_left + (current_bin_actual_width / 2.0)
-        
-        # Clamp tolerance so it doesn't exceed half of the actual bin width
+
+        # Clamp tolerance to at most half the actual bin width
         tol = max(0.0, float(close_tolerance))
         tol = min(tol, (current_bin_actual_width / 2.0) - 1e-12)
 
-        # Return single class if within center tolerance
         if abs(value - bin_center) <= tol:
             return [i]
 
-        # Outside center: apply standard uncertainty (half of standard bin_width)
         inc = bin_width / 2.0
         low = value - inc
         high = value + inc
@@ -282,30 +280,59 @@ def value_to_class(
         classes: List[int] = []
         for j in range(1, n_divisions + 1):
             L = (j - 1) * bin_width
-            R = min(j * bin_width, threshold) # Ensure we don't exceed threshold
-            
-            # Check intersection between [low, high] and (L, R]
+            R = min(j * bin_width, threshold)
             if (low < R) and (high > L):
                 classes.append(j)
 
         return classes if classes else None
 
-    else:
-        # Inverse logic: mapping values from threshold up to upper_bound
-        if value < threshold or value > upper_bound:
-            return None
-            
-        span = upper_bound - threshold
-        if span <= 0:
-            return None
-            
-        rel_value = value - threshold
-        class_name = math.ceil(rel_value / bin_width)
-        
-        # Clamp to the maximum number of bins possible in the span
-        max_inv_bins = math.ceil(span / bin_width)
-        return max(1, min(class_name, max_inv_bins))
-    
+    # Inverse logic: mapping values from threshold up to upper_bound
+    if value < threshold or value > upper_bound:
+        return None
+
+    span = upper_bound - threshold
+    if span <= 0:
+        return None
+
+    n_divisions = math.ceil(span / bin_width)
+
+    # Put the inverse domain on a local axis starting at 0
+    rel_value = value - threshold
+
+    # Primary bin index (1-based)
+    i = math.ceil(rel_value / bin_width)
+    i = max(1, min(i, n_divisions))
+
+    # Actual bin boundaries in the inverse domain (last bin may be smaller)
+    current_bin_left = (i - 1) * bin_width
+    current_bin_right = min(i * bin_width, span)
+    current_bin_actual_width = current_bin_right - current_bin_left
+
+    bin_center = current_bin_left + (current_bin_actual_width / 2.0)
+
+    tol = max(0.0, float(close_tolerance))
+    tol = min(tol, (current_bin_actual_width / 2.0) - 1e-12)
+
+    if abs(rel_value - bin_center) <= tol:
+        return [i]
+
+    inc = bin_width / 2.0
+    low = rel_value - inc
+    high = rel_value + inc
+
+    # Clamp to inverse domain [0, span]
+    low = max(0.0, low)
+    high = min(span, high)
+
+    classes: List[int] = []
+    for j in range(1, n_divisions + 1):
+        L = (j - 1) * bin_width
+        R = min(j * bin_width, span)
+        if (low < R) and (high > L):
+            classes.append(j)
+
+    return classes if classes else None
+   
 def dynamic_distance_to_classes(
     distance_classes: Dict[str, Dict[str, float]],
     value: float,
@@ -747,9 +774,9 @@ def find_triads(graph_data, classes, config, checks):
                     rsa2_class = find_class(rsa_classes, rsa2)
                     rsa3_class = find_class(rsa_classes, rsa3)
                 else:
-                    rsa1_class = value_to_class(rsa1, config["rsa_bins"], config["rsa_filter"]*100, inverse=True)
-                    rsa2_class = value_to_class(rsa2, config["rsa_bins"], config["rsa_filter"]*100, inverse=True)
-                    rsa3_class = value_to_class(rsa3, config["rsa_bins"], config["rsa_filter"]*100, inverse=True)
+                    rsa1_class = _as_list(value_to_class(rsa1, config["rsa_bin_width"], config["rsa_filter"]*100, inverse=True, close_tolerance=config["close_tolerance_rsa"]))
+                    rsa2_class = _as_list(value_to_class(rsa2, config["rsa_bin_width"], config["rsa_filter"]*100, inverse=True, close_tolerance=config["close_tolerance_rsa"]))
+                    rsa3_class = _as_list(value_to_class(rsa3, config["rsa_bin_width"], config["rsa_filter"]*100, inverse=True, close_tolerance=config["close_tolerance_rsa"]))
             else:
                 rsa1_class, rsa2_class, rsa3_class = 0, 0, 0
                                             
@@ -798,7 +825,7 @@ def find_triads(graph_data, classes, config, checks):
                 d2_opts = _as_list(
                     value_to_class(
                         d2,
-                        2 * config["distance_bin_width"],
+                        config["distance_bin_width"],
                         2 * config["edge_threshold"],
                         close_tolerance=config["close_tolerance"],
                     )
@@ -2040,176 +2067,7 @@ def association_product(graph_data: list,
     return {
         "AssociatedGraph": final_graphs
     }         
-    # filtered_cross_combos = []
-    # for step in range(1, steps+1):
-    #     log.debug(f"Executing the step {step}")
-    #     execute_step(step, graph_collection, max_chunks, qtd_graphs, config)
 
-    #     if passo == 1: 
-
-    #         chunks_triads = [graph_collection["triads"][i:i+max_chunks] for i in range(0, qtd_graphs, max_chunks)]
-    #         # input(f"Chunks_triads: {len(chunks_triads)}")
-    #         cross_combos_list = [cross_protein_triads(chunk_triad, 1.0) for i, chunk_triad in enumerate(chunks_triads) if not print(f"Creating combo | Chunk: {i}")]
-    #         
-    #         # input(f"Cross_combos_list: {len(cross_combos_list)}")
-    #         filtered_combos_list = [filter_cross_combos(
-    #                 cross_combos,
-    #                 graph_data,
-    #                 distance_std_threshold=2,
-    #                 roles_to_check=("UC","CW", "UW"),
-    #                 offset = i*max_chunks
-    #                 ) for i, cross_combos in enumerate(cross_combos_list) if not print(f"Filtering the combo | Chunk: {i}")]
-    #         # input(f"FIltered combos list: {len(filtered_combos_list)}")
-    #     else:
-    #         if not filtered_cross_combos:
-    #             raise Exception("Filtered Cross Combos is empty")
-    #         qtd_graphs = len(filtered_cross_combos)
-    #         chunk_triads = [filtered_cross_combos[i:i+max_chunks] for i in range(0, qtd_graphs, max_chunks)]
-    #         filtered_combos_list = [cross_protein_triads(chunk_triad, 1.0, check_distances=False)["full"] for i, chunk_triad in enumerate(chunk_triads) if not print(f"Creating | Combo Chunk: {i}") ] 
-
-    #     triad_graph_list = [build_graph_from_filtered_combos(filtered_combos) for filtered_combos in filtered_combos_list]
-    #     tuple_edges_list = [[tuple(edge) for edge in triad_graph] for triad_graph in triad_graph_list]
-    #     Graphs_list = []
-    #     for i, tuple_edge in enumerate(tuple_edges_list):
-    #         G = nx.Graph()
-    #         G.add_edges_from(tuple_edge)
-
-    #         for comp in list(nx.connected_components(G)):
-    #             if len(comp) == 3:
-    #                 G.remove_nodes_from(comp)
-    #         Graphs_list.append((i, G))
-
-    #     components_list = [(G[0], list(nx.connected_components(G[1]))) for G in Graphs_list]
-
-    #     Graphs_frames = []
-    #     for comps_idx, components in components_list:
-    #         index_offset = comps_idx * (max_chunks**passo)
-    #         comp_id = 1
-    #         processed_status = 1
-    #         maps["inv_maps"] = inv_maps
-    #         components_len = len(components)
-    #         nodes_qtds = [len(comp) for comp in components]
-    #         start_frame = time.perf_counter()
-    #         G = Graphs_list[comps_idx][1]
-    #         Graphs = [([G], 0)]
-
-    #         Frames_comp = set()
-    #         # input(f"Quantidade de components: {components_len} | Tamanho cada comp: {nodes_qtds}")
-    #         for component in components:
-    #             len_component = len(component)
-    #             log.debug(f"[{passo}] {comp_id}: Processing component {processed_status} / {components_len} with {len_component} nodes")
-    #             processed_status += 1
-    #             if len_component <= 4: 
-    #                 log.debug(f"[{passo}] {comp_id} Skipping component {processed_status-1}, because it has just {len_component} nodes")
-    #                 continue
-    #             subG = nx.Graph()
-    #             subG.add_nodes_from(component)
-
-    #             log.debug(f"[{passo}] {comp_id} Adding edges...")
-    #             for u in component:
-    #                 for v in G.neighbors(u):
-    #                     if v in component:
-    #                         subG.add_edge(u, v)
-
-    #             # if len(component) == 346:
-    #             #     input("Returning component 346")
-    #             #     return {
-    #             #         "AssociatedGraph": [([subG], 0)]
-    #             #     }
-
-    #             dm_thresh_graph = np.zeros((metadata["total_length"], metadata["total_length"]))
-    #             log.debug(f"[{passo}] Creating dm_thresh_graph matrices...")
-    #             for u, v in subG.edges():
-    #                 for p, (res_u, res_v) in enumerate(zip(u, v)):
-    #                     if res_u != res_v:
-    #                         split_res_u, split_res_v = res_u.split(":"), res_v.split(":")
-    #                         res_u_tuple = (split_res_u[0], split_res_u[2], split_res_u[1])
-    #                         res_v_tuple = (split_res_v[0], split_res_v[2], split_res_v[1])
-    #                         idx_u = inv_maps[p+index_offset][res_u_tuple]
-    #                         try:
-    #                             idx_v = inv_maps[p+index_offset][res_v_tuple]
-    #                         except Exception as e:
-    #                             raise Exception(f"Problema na proteína {p}, offset: {index_offset}, v tuple: {res_v_tuple}, passo: {passo}, comps_idx: {comps_idx}, comp_id: {comp_id}\nError: {e}")
-    #                         dm_thresh_graph[idx_u, idx_v] = dm_thresh[idx_u, idx_v]
-    #                         dm_thresh_graph[idx_v, idx_u] = dm_thresh[idx_v, idx_u]
-
-    #             save(f"comp_id_{comp_id}", "dm_thresh_graph", dm_thresh)
-    #             matrices_dict["dm_thresholded"] = dm_thresh_graph
-
-    #             nodes = list(subG.nodes())
-    #             nodes_indices = []
-
-    #             for node in nodes:
-    #                 node_converted = []
-    #                 for k, res in enumerate(node):
-    #                     res_split = res.split(":")
-    #                     res_tuple = (res_split[0], res_split[2], res_split[1])
-    #                     res_indice = inv_maps[k+index_offset][res_tuple]
-    #                     node_converted.append(res_indice)
-    #                 nodes_indices.append(node_converted)
-
-    #             save(f"comp_id_{comp_id}", "nodes_indices", nodes_indices)
-    #             log.debug(f"[{passo}] {comp_id} Creating the std_matrix...")
-    #             matrices_mul, maps_mul = create_std_matrix(
-    #                 nodes=nodes_indices,
-    #                 matrices=matrices_dict,
-    #                 maps=maps,
-    #                 threshold=config["distance_std_threshold"]
-    #             )
-
-    #             log.debug(f"[{passo}] {comp_id} Finished creating the std_matrix.")
-
-    #             save(f"comp_id_{comp_id}", "matrices_mul", matrices_mul)
-    #             save(f"comp_id_{comp_id}", "maps_mul", maps_mul)
-    #             
-    #             debugar_ = True if len(nodes) > 300 else False
-
-    #             tracer = TraversalTracer(
-    #                 out_dir="viz_runs",
-    #                 fmt="mp4",        # ou "mp4"
-    #                 fps=12,
-    #                 sample_every=50,  # amostragem para reduzir frames
-    #                 max_frames=2000,  # corta se passar disso
-    #                 dpi=110,
-    #                 enabled=True
-    #             )
-
-    #             if not debugar_: tracer.enabled=False
-
-    #             frames, union_graph, error = generate_frames(
-    #                 matrices=matrices_mul,
-    #                 maps=maps_mul,
-    #                 len_component=len_component,
-    #                 chunk_id=comps_idx,
-    #                 step=passo,
-    #                 debug=debugar_,
-    #                 tracer=tracer
-    #             )
-
-    #             if len(frames.keys()) > 1:
-    #                 
-    #                 if passo < passos: 
-    #                     Frames_comp = Frames_comp.union(union_graph["edges_residues"])
-    #                 else:
-    #                     Graphs.extend([(create_graph(frames, typeEdge="edges_residues", comp_id=comp_id), comp_id)])
-
-    #                 comp_id += 1
-    #             else:
-    #                 log.debug("Component Refused")
-    #         tuple_edges_frames = [tuple(edge) for edge in Frames_comp]
-
-    #         Graph_union_frames = nx.Graph()
-    #         Graph_union_frames.add_edges_from(tuple_edges_frames)
-    #         Graphs_frames.append((comps_idx, Graph_union_frames)) 
-
-    #     filtered_cross_combos = [rebuild_filtered_combos(filtered_combos, Graphs_frames[i][1]) for i, filtered_combos in enumerate(filtered_combos_list)]
-    # log.debug("Finished creating ALL Frames")
-    # log.debug(f"Took {end_frame - start_frame:.6f} seconds to create ALL Frames")
-    save("association_product", f"Graphs", Graphs)
-
-    return {
-            "AssociatedGraph": Graphs
-        }
 def generate_frames(component_graph, matrices, maps, len_component, chunk_id, step, debug=False, debug_every=5000, tracer: TraversalTracer=None, nodes=None, end=False):
     """
     Build frames by branching on coherent groups of the frontier.
