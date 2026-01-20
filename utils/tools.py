@@ -1690,6 +1690,7 @@ def process_chunk(step_idx, chunk_idx, chunk_triads, graph_data, global_state):
         rebuilt_combos = rebuild_filtered_combos(filtered_combos, Graph_union_frames)
     else:
         rebuilt_combos = None
+        final_graphs.insert(0, ([G], 0))
 
     return rebuilt_combos, final_graphs
 
