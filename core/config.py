@@ -104,6 +104,9 @@ class GraphConfig:
 
     make_virtual_cb_for_gly: bool = True
 
+    include_noncanonical_residues: bool = True
+    include_ligands: bool = False
+
 
 def make_default_config(
     *,
@@ -115,7 +118,9 @@ def make_default_config(
     rsa_method: Literal["sr", "dssp"] = "dssp",
     dssp_exec: str = "mkdssp",
     dssp_acc_array: Literal["Sander", "Wilke", "Miller"] = "Wilke",
-    make_virtual_cb_for_gly: bool = True
+    make_virtual_cb_for_gly: bool = True,
+    include_noncanonical_residues: bool = True,
+    include_ligands: bool = False
 ) -> GraphConfig:
     """
     Helper for creating a ``GraphConfig`` with common defaults.
@@ -160,5 +165,7 @@ def make_default_config(
         allow_empty_chains=False,
         granularity=granularity,
         verbose=False,
-        make_virtual_cb_for_gly=make_virtual_cb_for_gly
+        make_virtual_cb_for_gly=make_virtual_cb_for_gly,
+        include_noncanonical_residues=include_noncanonical_residues,
+        include_ligands=include_ligands
     )

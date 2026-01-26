@@ -1,15 +1,13 @@
 {
   "settings": {
-    "run_name": "mel_5",
+    "run_name": "dna",
     "run_mode": "all",
-    "output_path": "data/pdb_mel_rocio",
+    "output_path": "data/dna",
     "debug": true,
     "track_steps": false,
     "edge_threshold": 10,
     "node_granularity": "ca_only",
-    "include_ligands": true,
-    "include_noncanonical_residues": true,
-    "exclude_waters": false,
+    "exclude_waters": true,
     "triad_rsa": false,
     "check_depth": false,
     "rsa_filter": 0.1,
@@ -37,12 +35,9 @@
 
   "inputs": [
     {
-      "path": "~/GithubProjects/pMHC_graph/processed_mel/",
+      "path": "~/GithubProjects/pMHC_graph/Analysis/mbo/",
       "enable_tui": false,
-      "extensions": [".pdb", ".cif"],
-      "selectors": [
-        { "name": "MHC1" }
-      ]
+      "extensions": [".pdb", ".cif"]
     }
   ],
   "selectors": {

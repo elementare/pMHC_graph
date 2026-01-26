@@ -37,12 +37,10 @@ class GraphData(TypedDict):
     id: int
     graph: nx.Graph
     sorted_nodes: list[str]
-    depth_nodes: list[str]
     contact_map: np.ndarray
     residue_map: dict
     residue_map_all: dict
     rsa: np.ndarray
-    residue_depth: list[float]  
     pdb_file: str
 
 class Graph:
@@ -160,6 +158,57 @@ class AssociatedGraph:
         else:
             self.associated_graphs = None
 
+    def _parse_resnum_and_icode(self, resnum_str: str) -> tuple[int, str]:
+        """
+        Converte uma string de resnum (tipo '6', '6A') em (6, ' ') ou (6, 'A').
+        """
+        resnum_str = str(resnum_str).strip()
+        if resnum_str.isdigit() or (resnum_str.startswith('-') and resnum_str[1:].isdigit()):
+            return int(resnum_str), ' '
+        match = re.match(r"\s*(-?\d+)\s*([A-Za-z]?)\s*", resnum_str)
+        if not match:
+            raise ValueError(f"Invalid residue resnum: {resnum_str!r}")
+        resnum = int(match.group(1))
+        icode = match.group(2) or ' '
+        return resnum, icode
+
+    def _find_residue_by_label(self, model, label: str):
+        """
+        Dado um rótulo tipo 'C:SEP:6', tenta achar o Residue correspondente no modelo,
+        independente de ser ATOM ou HETATM (SEP, MSE, ligantes, etc.).
+        """
+        try:
+            chain_id, resname, resnum_str = label.split(':')
+        except ValueError:
+            raise ValueError(f"Invalid node label format (expected 'CHAIN:RESNAME:RESNUM'): {label!r}")
+
+        chain = model[chain_id]
+        resnum, icode = self._parse_resnum_and_icode(resnum_str)
+
+        # Primeiro tenta match estrito por (resnum, resname, icode)
+        candidates = []
+        for res in chain.get_residues():
+            hetflag, seq, ic = res.id
+            if seq != resnum:
+                continue
+            if icode != ' ' and ic != icode:
+                continue
+            if res.get_resname().strip().upper() == resname.strip().upper():
+                return res
+            candidates.append(res)
+
+        # Fallback: bate só por número (se não achou com nome)
+        for res in candidates:
+            return res
+
+        # Último fallback: qualquer resíduo com mesmo número na cadeia
+        for res in chain.get_residues():
+            hetflag, seq, ic = res.id
+            if seq == resnum:
+                return res
+
+        raise KeyError(f"Residue not found for label {label!r} (chain={chain_id}, resnum={resnum}, icode={icode!r})")
+    
     def _prepare_graph_data(self) -> List[GraphData]:
         """
         For each (Graph, raw) tuple, build a dictionary with the necessary data:
@@ -174,20 +223,15 @@ class AssociatedGraph:
             contact_map, residue_map, residue_map_all = build_contact_map(pdb_file, exclude_waters=self.association_config["exclude_waters"])
           
             sorted_nodes = sorted(list(g.nodes()))
-            depth_nodes = [str(node.split(":")[2])+node.split(":")[0] for node in sorted_nodes]
 
-            no170 = [node for node in sorted_nodes if node == "A:ARG:170"]
-            print(i, no170)
             data: GraphData = {
                 "id": i,
                 "graph": g,
                 "sorted_nodes": sorted_nodes,
-                "depth_nodes": depth_nodes,
                 "contact_map": contact_map,
                 "residue_map": residue_map,
                 "residue_map_all": residue_map_all,
                 "rsa": g.graph["dssp_df"]["rsa"],
-                "residue_depth": g.graph["depth"],
                 "pdb_file": pdb_file
             }
             graph_data.append(data)
@@ -196,76 +240,73 @@ class AssociatedGraph:
     
 
     def create_pdb_per_protein(self):
-        if isinstance(self.associated_graphs, list):
-            for i in range(len(self.graphs)):
-                pdb_file = self.graphs[i][-1]
-                parser = PDBParser(QUIET=True)
-                orig_struct = parser.get_structure('orig', pdb_file)
-                chain_counter = 1
-                new_struct = Structure.Structure('frames')
-                model = Model.Model(0)
-                new_struct.add(model)
+        if not isinstance(self.associated_graphs, list):
+            return
 
-                for comp_id, comps in enumerate(self.associated_graphs):
-                    for frame_id in range(len(comps[0])):
-                        nodes = set([node[i] for node in comps[0][frame_id].nodes])
+        for i in range(len(self.graphs)):
+            pdb_file = self.graphs[i][-1]
+            parser = PDBParser(QUIET=True)
+            orig_struct = parser.get_structure('orig', pdb_file)
 
-                        chain_id = f"K{comp_id}{chain_counter:03d}"
-                        chain_counter += 1
-                        chain = Chain.Chain(chain_id)
+            chain_counter = 1
+            new_struct = Structure.Structure('frames')
+            model = Model.Model(0)
+            new_struct.add(model)
 
-                        for node in nodes:
-                            parts = node.split(':')
-                            chain_name = parts[0]
-                            resnum = parts[2]
-                            if resnum.isdigit():
-                                    resnum = int(resnum)
-                                    icode = " "
-                            else:
-                                match = re.match(r"\s*(-?\d+)\s*([A-Za-z]?)\s*", resnum)
-                                if not match:
-                                    raise ValueError(f"Invalid residue resnum: {resnum}")
-                                resnum = int(match.group(1))
-                                icode = match.group(2) or ' ' 
+            for comp_id, comps in enumerate(self.associated_graphs):
+                for frame_id, frame_graph in enumerate(comps[0]):
+                    nodes = set(node[i] for node in frame_graph.nodes)
 
-                            try:
-                                orig_res = orig_struct[0][chain_name][(" ", int(resnum), icode)]
-                            except KeyError:
-                                print(f"Resíduo {node} não encontrado, pulando.")
-                                continue
-                            res_id = (" ", int(resnum), f"{chain_name}:{icode}")
-                            new_res = Residue.Residue(res_id, chain_name+orig_res.resname, orig_res.segid)
+                    chain_id = f"K{comp_id}{chain_counter:03d}"
+                    chain_counter += 1
+                    chain = Chain.Chain(chain_id)
 
-                            for atom in orig_res:
-                                new_atom = Atom.Atom(
-                                    atom.get_name(),
-                                    atom.get_coord().copy(),
-                                    atom.get_bfactor(),
-                                    atom.get_occupancy(),
-                                    atom.get_altloc(),
-                                    atom.get_fullname(),
-                                    atom.get_serial_number(),
-                                    element=atom.element
-                                )
-                                new_res.add(new_atom)
-                            chain.add(new_res)
+                    for node_label in nodes:
+                        try:
+                            orig_res = self._find_residue_by_label(orig_struct[0], node_label)
+                        except KeyError:
+                            print(f"Resíduo {node_label} não encontrado em {pdb_file}, pulando.")
+                            continue
 
-                        model.add(chain)
+                        chain_name, resname, resnum_str = node_label.split(':')
+                        resnum, icode = self._parse_resnum_and_icode(resnum_str)
 
-                out_dir = self.output_path / "frames"
-                out_dir.mkdir(exist_ok=True)
-                use_cif = True
-                if use_cif:
-                    io = MMCIFIO()
-                    out_file = out_dir / f"{Path(pdb_file).stem}_frames.cif"
-                else:
-                    io = PDBIO()
-                    out_file = out_dir / f"{Path(pdb_file).stem}_frames.pdb"
+                        hetflag, _, _ = orig_res.id
+                        res_id = (hetflag, resnum, icode)
 
-                io.set_structure(new_struct)
-                io.save(str(out_file))
+                        new_res = Residue.Residue(res_id, orig_res.resname, orig_res.segid)
 
-                print(f"Estrutura salva em {out_file}")
+                        for atom in orig_res:
+                            new_atom = Atom.Atom(
+                                atom.get_name(),
+                                atom.get_coord().copy(),
+                                atom.get_bfactor(),
+                                atom.get_occupancy(),
+                                atom.get_altloc(),
+                                atom.get_fullname(),
+                                atom.get_serial_number(),
+                                element=atom.element
+                            )
+                            new_res.add(new_atom)
+
+                        chain.add(new_res)
+
+                    model.add(chain)
+
+            out_dir = self.output_path / "frames"
+            out_dir.mkdir(exist_ok=True)
+            use_cif = True
+            if use_cif:
+                io = MMCIFIO()
+                out_file = out_dir / f"{Path(pdb_file).stem}_frames.cif"
+            else:
+                io = PDBIO()
+                out_file = out_dir / f"{Path(pdb_file).stem}_frames.pdb"
+
+            io.set_structure(new_struct)
+            io.save(str(out_file))
+
+            print(f"Estrutura salva em {out_file}")
 
 
     def _parse_label(self, label: str):
@@ -313,11 +354,14 @@ class AssociatedGraph:
 
     def align_all_frames(self):
         """
-        Para cada componente (frame) em self.associated_graphs:
-          - recria fresh os modelos de cada PDB em self.graphs
-          - usa o modelo 0 como referência
-          - alinha cada proteína móvel de acordo com as tuplas de rótulos do nó
-          - salva um mmCIF multi-model com todos os modelos já alinhados
+        For each component (frame) in self.associated_graphs:
+        - recreate fresh instances of the PDB models in self.graphs
+        - use model 0 as the reference
+        - align each mobile protein using a subset of nodes
+            for which ALL involved residues have a CA atom
+        - ignore water, ligands, and anything that lacks a CA atom
+        - save a multichain mmCIF with all models already aligned
+
         """
         parser = PDBParser(QUIET=True)
 
@@ -325,45 +369,59 @@ class AssociatedGraph:
             for frame_idx, assoc_graph in enumerate(frame_graphs):
                 nodes = list(assoc_graph.nodes())
                 if not nodes:
-                    return False
+                    print(f"[comp{comp_idx}_frame{frame_idx}] graph vazio, pulando.")
+                    continue
+
                 models = []
                 for prot_idx, (_, pdb_path) in enumerate(self.graphs):
                     struct = parser.get_structure(f"p{prot_idx}", pdb_path)
                     models.append(struct[0])
 
-                ref_cas = []
+                anchor_labels = []
                 for label in nodes:
-                    chain, resnum, icode = self._parse_label(label[0])
-                    if resnum.isdigit():
-                        resnum = int(resnum)
-                    else:
-                        match = re.match(r"\s*(-?\d+)\s*([A-Za-z]?)\s*", resnum)
-                        if not match:
-                            raise ValueError(f"Invalid residue resnum: {resnum}")
-                        resnum = int(match.group(1))
-                        icode = match.group(2) or ' ' 
                     try:
-                        ref_res = models[0][chain][(' ', int(resnum), icode)]
-                    except Exception as e:
-                        print(e)
-                        print(dir(models[0][chain]))
-                        print(models[0][chain].tolist())
-                        input()
+                        ref_res = self._find_residue_by_label(models[0], label[0])
+                    except KeyError:
+                        continue
+
+                    try:
+                        ref_res['CA']
+                    except KeyError:
+                        continue
+
+                    ok = True
+                    for prot_idx in range(1, len(models)):
+                        try:
+                            mob_res = self._find_residue_by_label(models[prot_idx], label[prot_idx])
+                        except KeyError:
+                            ok = False
+                            break
+                        try:
+                            mob_res['CA']
+                        except KeyError:
+                            ok = False
+                            break
+
+                    if ok:
+                        anchor_labels.append(label)
+
+                if len(anchor_labels) < 3:
+                    print(
+                        f"[comp{comp_idx}_frame{frame_idx}] "
+                        f"menos de 3 resíduos com CA comum ({len(anchor_labels)} encontrados), "
+                        "não dá para alinhar este frame, pulando."
+                    )
+                    continue
+
+                ref_cas = []
+                for label in anchor_labels:
+                    ref_res = self._find_residue_by_label(models[0], label[0])
                     ref_cas.append(ref_res['CA'])
 
                 for prot_idx in range(1, len(models)):
                     mob_cas = []
-                    for label in nodes:
-                        chain, resnum, icode = self._parse_label(label[prot_idx])
-                        if resnum.isdigit():
-                                resnum = int(resnum)
-                        else:
-                            match = re.match(r"\s*(-?\d+)\s*([A-Za-z]?)\s*", resnum)
-                            if not match:
-                                raise ValueError(f"Invalid residue resnum: {resnum}")
-                            resnum = int(match.group(1))
-                            icode = match.group(2) or ' ' 
-                        mob_res = models[prot_idx][chain][(' ', resnum, icode)]
+                    for label in anchor_labels:
+                        mob_res = self._find_residue_by_label(models[prot_idx], label[prot_idx])
                         mob_cas.append(mob_res['CA'])
 
                     sup = Superimposer()
@@ -372,11 +430,12 @@ class AssociatedGraph:
 
                     print(
                         f"[comp{comp_idx}_frame{frame_idx}] "
-                        f"prot{prot_idx} ← prot0  RMSD={sup.rms:.2f}"
+                        f"prot{prot_idx} <- prot0  RMSD={sup.rms:.2f}"
                     )
 
                 output_dir = self.output_path / "frames"
                 self._write_frame_multichain(comp_idx, frame_idx, models, output_dir)
+
 
 
     def draw_graph_interactive(self, show=False, save=True):
