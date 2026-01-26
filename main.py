@@ -39,25 +39,20 @@ def load_manifest(manifest_path: str) -> Dict[str, Any]:
     S.setdefault("edge_threshold", 8.5)
     S.setdefault("close_tolerance", 1.0)
     S.setdefault("node_granularity", "all_atoms")
+
+    S.setdefault("include_ligands", True)
+    S.setdefault("include_noncanonical_residues", True)
     S.setdefault("exclude_waters", True)
 
     S.setdefault("triad_rsa", False)
-    S.setdefault("check_depth", False)
-
     S.setdefault("rsa_filter", 0.1)
-    S.setdefault("depth_filter", 10.0)
-
+    S.setdefault("close_tolerance_rsa", 0.1)
     S.setdefault("distance_std_threshold", 3.0)
     S.setdefault("distance_diff_threshold", 1.0)
 
     S.setdefault("rsa_bin_width", 0.2)
     S.setdefault("distance_bin_width", 2.0)
-    S.setdefault("depth_bins", 5)
 
-    S.setdefault("distance_bins", 5)
-    # S.setdefault("distance_bins", 5)
-
-    S.setdefault("serd_config", None)
     S.setdefault("max_chunks", 5)
 
     S.setdefault("filter_triads_by_chain", None)
@@ -168,8 +163,11 @@ def main():
         "depth_bins":               S.get("depth_bins"),
         "distance_bin_width":       S.get("distance_bin_width"),
         "close_tolerance":          S.get("close_tolerance"),
+        "close_tolerance_rsa":      S.get("close_tolerance_rsa"),
         "checks":                   checks,
         "exclude_waters":           S.get("exclude_waters"),
+        "include_ligands":          S.get("include_ligands"),
+        "include_noncanonical_residues": S.get("include_noncanonical_residues"),
         "classes":                  S.get("classes", {}),
         "max_chunks":               S.get("max_chunks"),
         "rsa_table":                S.get("rsa_table", "Wilke"),

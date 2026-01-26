@@ -1,4 +1,3 @@
-# pdb_graph_builder.py
 from __future__ import annotations
 
 from core.config import GraphConfig
@@ -730,6 +729,47 @@ class PDBGraphBuilder:
                     out.append((_node_id(ch.id, res, kind="water"), res, cent))
         return out
 
+    def _collect_nonprotein_residues(
+        self,
+        chains: List[Chain],
+    ) -> List[Tuple[str, Residue, np.ndarray, str]]:
+        """
+        Collects non-protein residues (excluding water) and classifies them as:
+
+        - 'noncanonical_residue': HETATM entries that are still amino acids (is_aa with standard=False)
+        and when config.include_noncanonical_residues = True
+        - 'ligand': HETATM entries that are not amino acids and when config.include_ligands = True
+
+        Returns a list of (node_id, Residue, centroid, kind).
+        """
+        out: List[Tuple[str, Residue, np.ndarray, str]] = []
+
+        for ch in chains:
+            for res in ch.get_residues():
+                if _is_protein_residue(res) or _is_water(res):
+                    continue
+
+                hetflag, resseq, icode = res.id
+                resname = res.get_resname().strip().upper()
+
+                aa_like = is_aa(res, standard=False)
+
+                kind: Optional[str] = None
+                if aa_like and self.config.include_noncanonical_residues:
+                    kind = "noncanonical_residue"
+                elif (not aa_like) and self.config.include_ligands:
+                    kind = "ligand"
+
+                if kind is None:
+                    continue
+
+                coords = _heavy_atom_coords(res)
+                cent = _centroid(coords)
+                nid = _node_id(ch.id, res, kind="residue")
+                out.append((nid, res, cent, kind))
+
+        return out
+
     def build_graph(self) -> BuiltGraph:
         """
         Run the full pipeline: load → select chains → ASA/RSA → distances → graph.
@@ -754,6 +794,15 @@ class PDBGraphBuilder:
         for msg in inconsist:
             log.warning(msg)
 
+        extra_tuples = self._collect_nonprotein_residues(chains)
+        node_kind = {}
+
+        for nid, res, cent in res_tuples:
+            node_kind[nid] = "residue"
+        for nid, res, cent, kind in extra_tuples:
+            res_tuples.append((nid, res, cent))
+            node_kind[nid] = kind
+
         water_tuples = self._collect_waters(chains)
         raw_pdb_df, pdb_df, rgroup_df = self._make_atom_tables(chains)
         pdb_df = self._centroid_pdb_df_from_raw(raw_pdb_df)
@@ -765,7 +814,9 @@ class PDBGraphBuilder:
         asa_rsa: Dict[str, Tuple[float, float]] = {}
         dssp_df: Optional[pd.DataFrame] = None
         if self.config.compute_rsa:
-            asa_rsa, dssp_df = self._compute_asa_rsa(res_tuples)
+            if res_tuples:
+                asa_rsa, dssp_df = self._compute_asa_rsa(res_tuples)
+
 
         res_ids = [t[0] for t in res_tuples]
         res_objects = [t[1] for t in res_tuples]
@@ -777,6 +828,7 @@ class PDBGraphBuilder:
         G = nx.Graph()
         for nid, res, cent in res_tuples:
             asa, rsa = asa_rsa.get(nid, (None, None))
+            kind = node_kind.get(nid, "residue")
             extra = ca_cb_map.get(nid, {})
             ca_coord = extra.get("ca_coord", nan3)
             cb_coord = extra.get("cb_coord", nan3)
@@ -784,7 +836,7 @@ class PDBGraphBuilder:
 
             G.add_node(
                 nid,
-                kind="residue",
+                kind=kind,
                 chain=res.get_parent().id,
                 resname=res.get_resname(),
                 resseq=int(res.id[1]),
@@ -797,6 +849,7 @@ class PDBGraphBuilder:
                 asa=None if asa is None else float(asa),
                 rsa=None if rsa is None else float(rsa),
             )
+
 
         interacting_nodes = np.where(dist_mat <= self.config.residue_distance_cutoff)
         interacting_nodes = list(zip(interacting_nodes[0], interacting_nodes[1]))
@@ -856,7 +909,6 @@ class PDBGraphBuilder:
                         if 0.0 < d <= wcut:
                             G.add_edge(water_ids[wi], res_ids[rj], distance=d, kind="wat-res")
 
-        # Consolidate DSSP table with RSA for all nodes (including waters)
         rsa_series = pd.Series(
             {nid: (float(d.get("rsa")) if d.get("rsa") is not None else np.nan)
              for nid, d in G.nodes(data=True)},
@@ -887,6 +939,7 @@ class PDBGraphBuilder:
             rgroup_df=rgroup_df,
             dssp_df=dssp_df
         )
+
         return built
 
     @staticmethod
@@ -955,9 +1008,9 @@ if __name__ == "__main__":
 
     args = ap.parse_args()
 
-    cfg = GraphBuildConfig(
+    cfg = GraphConfig(
         chains=None if args.chains is None else [c.strip() for c in args.chains.split(",") if c.strip()],
-        include_waters=args.include_waters,
+        exclude_waters=args.include_waters,
         residue_distance_cutoff=args.res_cut,
         water_distance_cutoff=args.wat_cut,
         compute_rsa=not args.no_rsa,

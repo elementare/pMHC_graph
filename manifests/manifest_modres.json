@@ -1,14 +1,12 @@
 {
   "settings": {
-    "run_name": "mel_5",
+    "run_name": "modified_with_hoh",
     "run_mode": "all",
-    "output_path": "data/pdb_mel_rocio",
+    "output_path": "data/pdb_modified",
     "debug": true,
     "track_steps": false,
     "edge_threshold": 10,
     "node_granularity": "ca_only",
-    "include_ligands": true,
-    "include_noncanonical_residues": true,
     "exclude_waters": false,
     "triad_rsa": false,
     "check_depth": false,
@@ -37,7 +35,7 @@
 
   "inputs": [
     {
-      "path": "~/GithubProjects/pMHC_graph/processed_mel/",
+      "path": "~/GithubProjects/pMHC_graph/Analysis/modified_residues/",
       "enable_tui": false,
       "extensions": [".pdb", ".cif"],
       "selectors": [
