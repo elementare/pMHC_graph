@@ -273,11 +273,14 @@ def create_graphs(manifest: Dict) -> List[Tuple]:
     if not selected_files:
         raise Exception("Nenhum arquivo selecionado a partir do manifest")
 
+    print(S["include_ligands"])
     graph_config = make_default_config(
         edge_threshold=S["edge_threshold"],
         granularity=S["node_granularity"],
         exclude_waters=S["exclude_waters"],
-        dssp_acc_array=S["rsa_table"]
+        dssp_acc_array=S["rsa_table"],
+        include_ligands=S["include_ligands"],
+        include_noncanonical_residues=S["include_noncanonical_residues"]
     )
 
     graphs: List[Tuple] = []
@@ -301,8 +304,6 @@ def create_graphs(manifest: Dict) -> List[Tuple]:
             graph_path = orig_path
 
         graph_instance = Graph(config=graph_config, graph_path=str(graph_path))
-
-        depth = None
         selection_params = resolve_selection_params_for_file(orig_path, manifest)
 
         subgraph = get_exposed_residues(
@@ -311,8 +312,6 @@ def create_graphs(manifest: Dict) -> List[Tuple]:
             depth_filter=S.get("depth_filter") if S.get("depth_check") else None,
             selection_params=selection_params or {},
         )
-
-        subgraph.graph["depth"] = depth
 
         save("create_graphs", f"{graph_path.stem}_subgraph", subgraph)
         graphs.append((subgraph, str(orig_path)))

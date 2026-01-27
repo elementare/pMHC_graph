@@ -3,44 +3,20 @@
   "steps": [
     {
       "step": 1,
-      "num_items": 9,
-      "num_chunks": 2,
-      "chunks": [
-        {
-          "chunk_idx": 0,
-          "num_triads_in_chunk": 5,
-          "time_sec": 0.027257349000137765,
-          "mem_before_mb": 263.24609375,
-          "mem_after_mb": 265.703125
-        },
-        {
-          "chunk_idx": 1,
-          "num_triads_in_chunk": 4,
-          "time_sec": 0.01740420199712389,
-          "mem_before_mb": 265.703125,
-          "mem_after_mb": 267.1875
-        }
-      ],
-      "time_sec": 0.04481139000199619,
-      "mem_before_mb": 263.2421875,
-      "mem_after_mb": 267.1875
-    },
-    {
-      "step": 2,
       "num_items": 2,
       "num_chunks": 1,
       "chunks": [
         {
           "chunk_idx": 0,
           "num_triads_in_chunk": 2,
-          "time_sec": 2.165998855998623,
-          "mem_before_mb": 267.1875,
-          "mem_after_mb": 315.47265625
+          "time_sec": 0.10681356399982178,
+          "mem_before_mb": 240.10546875,
+          "mem_after_mb": 239.96875
         }
       ],
-      "time_sec": 2.166086664998147,
-      "mem_before_mb": 267.1875,
-      "mem_after_mb": 315.47265625
+      "time_sec": 0.10690086299837276,
+      "mem_before_mb": 240.10546875,
+      "mem_after_mb": 239.96875
     }
   ]
 }
