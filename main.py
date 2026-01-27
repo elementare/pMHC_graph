@@ -145,7 +145,6 @@ def main():
     log.setLevel(logging.DEBUG if S.get("debug", False) else logging.INFO)
 
     checks = {
-        "depth": S.get("check_depth"),
         "rsa":   S.get("triad_rsa"),
     }
 
@@ -158,9 +157,7 @@ def main():
         "distance_std_threshold":   S.get("distance_std_threshold"),
         "distance_diff_threshold":  S.get("distance_diff_threshold"),
         "rsa_filter":               S.get("rsa_filter"),
-        "depth_filter":             S.get("depth_filter"),
         "rsa_bin_width":            S.get("rsa_bin_width"),
-        "depth_bins":               S.get("depth_bins"),
         "distance_bin_width":       S.get("distance_bin_width"),
         "close_tolerance":          S.get("close_tolerance"),
         "close_tolerance_rsa":      S.get("close_tolerance_rsa"),
@@ -171,7 +168,6 @@ def main():
         "classes":                  S.get("classes", {}),
         "max_chunks":               S.get("max_chunks"),
         "rsa_table":                S.get("rsa_table", "Wilke"),
-        "distance_bins":            S.get("distance_bins", 5),
         "filter_triads_by_chain":   S.get("filter_triads_by_chain", None),
     }
 
