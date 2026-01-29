@@ -13,6 +13,13 @@ from typing import Dict, Any
 
 from core.tracking import init_tracker
 
+from utils.analysis import (
+    _make_json_from_associated_graph,
+    evaluate_all_frames_nodes_weighted,
+    _save_eval_tables,
+)
+
+
 def load_manifest(manifest_path: str) -> Dict[str, Any]:
     if not manifest_path:
         return {}
@@ -119,6 +126,26 @@ def run_association_task(graphs, output_path, run_name, association_config, log)
     with open(output_json, "w") as f:
         json.dump(graph_data, f, indent=4)
     log.info(f"Graph data saved to {output_json}")
+
+    analysis_json_path = Path(output_path) / f"graph_{run_name}.json"
+    _make_json_from_associated_graph(G, analysis_json_path)
+    log.info(f"Analysis graph JSON saved to {analysis_json_path}")
+
+    try:
+        df_fp_nodes, df_frames_nodes_w = evaluate_all_frames_nodes_weighted(
+            analysis_json_path
+        )
+        if (
+            not df_fp_nodes.empty
+            and "frame_nodes_unique" in df_fp_nodes.columns
+            and "total_nodes_associated" not in df_fp_nodes.columns
+        ):
+            df_fp_nodes["total_nodes_associated"] = df_fp_nodes["frame_nodes_unique"]
+
+        _save_eval_tables(Path(output_path), df_fp_nodes, df_frames_nodes_w)
+        log.info(f"Evaluation tables saved in {output_path}")
+    except Exception as e:
+        log.error(f"Failed to compute evaluation tables: {e}")
 
 def main():
     args = parse_args() 

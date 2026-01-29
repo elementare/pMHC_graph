@@ -1,22 +1,19 @@
 {
   "settings": {
     "run_name": "mel_5",
-    "output_path": "data/pdb_mel_relatorio",
+    "output_path": "data/pdb_mel_analysis",
     "debug": true,
     "track_steps": false,
-    "node_threshold": 10,
+    "edge_threshold": 10,
     "node_granularity": "ca_only",
     "exclude_waters": false,
     "triad_rsa": false,
     "check_depth": false,
     "rsa_filter": 0.1,
-    "depth_filter": 10.0,
-    "_distance_std_threshold": {"A": 2.0, "C": 3.0},
     "distance_std_threshold": 3.0,
     "distance_diff_threshold": 2.0,
     "filter_triads_by_chain": ["C"],    
     "distance_bin_width": 2,
-    "rsa_bins": 3,
     "depth_bins": 5,
 
 

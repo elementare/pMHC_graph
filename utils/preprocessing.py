@@ -35,7 +35,6 @@ def _eval_logic_expression(expr: str,
         raise LogicError("Empty logic expression")
 
     tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]*|[()!&|]", expr.replace(" ", ""))
-    print(f"tokens: {tokens} | sets: {sets} | expr: {expr}")
     prec = {"!": 3, "&": 2, "|": 1}
     right_assoc = {"!"}
     output = []
@@ -165,6 +164,7 @@ def get_exposed_residues(graph: Graph, rsa_filter = 0.1, asa_filter = 100.0, sel
         sets["residues"] = set(r_sub.nodes()) if r_sub is not None else set()
 
     if "structures" in selection_params:
+        print(f"Entrei em structures: {selection_params}")
         structures_cfg = selection_params["structures"]
 
         if isinstance(structures_cfg, list):
@@ -210,11 +210,13 @@ def get_exposed_residues(graph: Graph, rsa_filter = 0.1, asa_filter = 100.0, sel
             )
 
     if not logic_expr:
-        active_sets = [sets["exposed"]]
-        for key in ("chains", "residues", "structures"):
-            if key in sets:
-                active_sets.append(sets[key])
-        selected = set.intersection(*active_sets) if active_sets else sets["exposed"]
+        selected = set(sets["exposed"])
+        if "residues" in sets:
+            selected = selected.intersection(sets["residues"])
+        if "structures" in sets:
+            selected = selected.intersection(sets["structures"])
+        if "chains" in sets:
+            selected = selected.union(sets["chains"])
     else:
         selected = _eval_logic_expression(logic_expr, sets, universe)
         if "exposed" in sets and "exposed" not in logic_expr:
@@ -271,19 +273,22 @@ def _merge_constraints(base: Dict[str, Any], add: Dict[str, Any]) -> Dict[str, A
         field is preserved either as a list or as a dict; mixing both
         representations across inputs is not allowed and raises TypeError.
     """
-    out: Dict[str, Any] = {
-        "chains": [],
-        "residues": {},
-        "structures": None,
-    }
-
+    # out: Dict[str, Any] = {
+    #     "chains": [],
+    #     "residues": {},
+    #     "structures": None,
+    # }
+    
+    out: Dict[str, Any] = {}
     for src in (base or {}, add or {}):
         chains = src.get("chains") or []
+        if chains: out["chains"] = []
         for c in chains:
             if c not in out["chains"]:
                 out["chains"].append(c)
 
         residues = src.get("residues") or {}
+        if residues: out["residues"] = {}
         for ch, positions in residues.items():
             lst = out["residues"].setdefault(ch, [])
             for p in positions:
@@ -291,6 +296,7 @@ def _merge_constraints(base: Dict[str, Any], add: Dict[str, Any]) -> Dict[str, A
                     lst.append(p)
 
         structures = src.get("structures", None)
+        if structures: out["structures"] = None
         if structures is None:
             continue
 
@@ -321,9 +327,6 @@ def _merge_constraints(base: Dict[str, Any], add: Dict[str, Any]) -> Dict[str, A
             raise TypeError(
                 f"'structures' must be list or dict, got {type(structures)}"
             )
-
-    if out["structures"] is None:
-        out["structures"] = []
 
     return out
 
