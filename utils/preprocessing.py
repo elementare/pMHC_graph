@@ -211,7 +211,6 @@ def get_exposed_residues(graph: Graph, rsa_filter = 0.1, asa_filter = 100.0, sel
 
     if not logic_expr:
         union_sets = []
-        print(f"sets: {sets}")
         for key in ("residues", "chains", "structures"):
             if key in sets:
                 union_sets.append(sets[key])
