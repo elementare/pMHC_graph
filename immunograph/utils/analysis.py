@@ -28,7 +28,7 @@ def _make_json_from_associated_graph(G: AssociatedGraph, out_json: Path) -> None
     out_json : Path
         Output path for the JSON file.
     """
-    graphs_raw = G.graph_data
+    graphs_raw = G.graphs_data
     payload: Dict[str, Any] = {"original_graphs": {}}
 
     for graph_raw in graphs_raw:
