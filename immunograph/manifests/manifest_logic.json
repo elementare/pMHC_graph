@@ -60,13 +60,15 @@
     },
     "general": {
       "chains": ["E"],
+      "structures": ["B"]
       "structures": {
-        "I": ["B", "E"]
+        "I": ["B", "E"],
+        "B": ["B"]
       },
       "residues": {
         "I": [61]
       },
-      "_logic": "(exposed & (residues | structures | chains:E))"
+      "_logic": "(exposed & (residues | structures: | chains:E))"
     }
   }
 }

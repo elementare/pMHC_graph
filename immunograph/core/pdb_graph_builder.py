@@ -1,4 +1,5 @@
 from __future__ import annotations
+import tempfile
 
 from immunograph.core.config import GraphConfig, DSSPConfig
 from immunograph.core.metadata import secondary_structure
@@ -13,7 +14,7 @@ from typing import Dict, Iterable, List, Optional, Tuple, Literal
 import networkx as nx
 import numpy as np
 import pandas as pd
-from Bio.PDB import MMCIFParser, PDBParser, ShrakeRupley
+from Bio.PDB import MMCIFParser, PDBParser, ShrakeRupley, PDBIO
 from Bio.PDB.Polypeptide import is_aa
 from Bio.PDB.Structure import Structure
 from Bio.PDB.Chain import Chain
@@ -101,7 +102,6 @@ def _node_id(chain_id: str, res: Residue, kind: str = "residue") -> str:
     if kind == "water":
         return f"{chain_id}:HOH:{resseq}{(icode.strip() or '')}"
     return f"{chain_id}:{resname}:{resseq}{(icode.strip() or '')}"
-
 
 def res_tuples_to_df(res_tuples):
     """
@@ -233,6 +233,28 @@ class PDBGraphBuilder:
         self.structure = parser.get_structure("struct", self.pdb_path)
         log.info("Structure loaded from %s", self.pdb_path)
 
+    def _ensure_pdb_for_dssp(self) -> str:
+        """
+        Return a path to a PDB file suitable for mkdssp.
+        If input is already PDB, return original path.
+        If input is mmCIF, write a temporary PDB from self.structure and return it.
+        """
+        assert self.structure is not None
+
+        p = self.pdb_path.lower()
+        if p.endswith(".pdb"):
+            return self.pdb_path
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".pdb", delete=False)
+        tmp_path = tmp.name
+        tmp.close()
+
+        io = PDBIO()
+        io.set_structure(self.structure)
+        io.save(tmp_path)
+        return tmp_path
+
+
     def _compute_asa_rsa(
         self, res_tuples: List[Tuple[str, Residue, np.ndarray]]
     ) -> Tuple[Dict[str, Tuple[float, Optional[float]]], Optional[pd.DataFrame]]:
@@ -280,9 +302,11 @@ class PDBGraphBuilder:
         if self.config.rsa_method == "dssp":
             model = self.structure[self.config.model_index]
 
+            dssp_input_path = self._ensure_pdb_for_dssp()
+
             dssp = DSSP(
                 model,
-                self.pdb_path,
+                dssp_input_path,
                 dssp=self.config.dssp_exec,
                 acc_array=self.config.dssp_acc_array,
             )

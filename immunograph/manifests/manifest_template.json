@@ -21,7 +21,7 @@
     "distance_diff_threshold": 2.0,
     "_filter_triads_by_chain": ["C"],    
     "distance_bin_width": 2,
-    "close_tolerance": 1.0,
+    "close_tolerance": 0.1,
     "rsa_bin_width": 0.2,
 
     "_classes": {

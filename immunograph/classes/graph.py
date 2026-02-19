@@ -15,6 +15,7 @@ from Bio.PDB import Structure, Model, Chain, Residue, Atom
 from Bio.PDB.mmcifio import MMCIFIO
 from Bio.PDB.PDBIO import PDBIO
 from Bio.PDB.PDBParser import PDBParser
+from Bio.PDB.MMCIFParser import MMCIFParser
 from Bio.PDB.Superimposer import Superimposer
 from pyvis.network import Network
 
@@ -65,7 +66,6 @@ class Graph:
         self.raw_pdb_df: Optional[pd.DataFrame] = self.graph.graph.get("raw_pdb_df")
         self.rgroup_df: Optional[pd.DataFrame] = self.graph.graph.get("rgroup_df")
         self.dssp_df: Optional[pd.DataFrame] = self.graph.graph.get("dssp_df")
-        self.depth: Optional[pd.DataFrame]
 
     def get_subgraph(self, name:str):
         if name not in self.subgraphs.keys():
@@ -94,7 +94,7 @@ class Graph:
                 return subgraphs_name.nodes 
         
     def delete_subraph(self, name: str):
-        if name not in  self.subgraphs.keys():
+        if name in self.subgraphs.keys():
             del self.subgraphs[name]
         else:
             print(f"{name} isn't in.subgraphs")
@@ -117,16 +117,10 @@ class Graph:
             self.subgraphs[name] = subgraphs_sub_name.subgraph(nodes)
         else:
             self.subgraphs[subgraph_name] = subgraphs_sub_name.subgraph(nodes)
-        
-        if return_node_list:
-            subgraphs_name = self.subgraphs[name] if isinstance(name, str) else None
-            
-            if name is not None and isinstance(subgraphs_name, nx.Graph):
-                return list(subgraphs_name.nodes)
-            elif name is None and isinstance(subgraphs_sub_name, nx.Graph):
-                return list(subgraphs_sub_name)
-            
-            return None 
+       
+        target = self.subgraphs[name] if name else self.subgraphs[subgraph_name]
+        if return_node_list and isinstance(target, nx.Graph):
+            return list(target.nodes)
 
         return None
 
@@ -139,7 +133,7 @@ class Graph:
                 for i in graphs_name:
                     subgraph_i = self.subgraphs[i]
                     if isinstance(subgraph_i, nx.Graph):
-                        nodes_list.append(*subgraph_i.nodes)
+                        nodes_list.extend(list(subgraph_i.nodes))
                 self.subgraphs[name] = self.graph.subgraph(nodes_list)
             elif mode == "intersection":
                 intersection = set()
@@ -203,7 +197,12 @@ class Graph:
         name: str, 
         use_cif: bool = False):
 
-        parser = PDBParser(QUIET=True)
+        path = str(self.graph_path)
+        if path.lower().endswith((".cif", ".mmcif")):
+            parser = MMCIFParser(QUIET=True)
+        else:
+            parser = PDBParser(QUIET=True)
+
         orig = parser.get_structure("orig", self.graph_path)
 
         node_labels = set(g.nodes())

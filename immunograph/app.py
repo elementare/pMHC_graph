@@ -8,6 +8,7 @@ from immunograph.workflow.manifest import load_manifest, build_association_confi
 from immunograph.workflow.association import run_association_task 
 from immunograph.utils.preprocessing import create_graphs
 from immunograph.core.tracking import init_tracker
+from immunograph.core.residue_tracking import ResidueTracker
 
 def main():
     args = parse_args() 
@@ -18,6 +19,8 @@ def main():
     base_output_path = Path(S["output_path"])
     run_mode = S.get("run_mode", "all") 
 
+    tracker_residues = ResidueTracker(S.get("watch_residues")) if S["watch_residues"] else None
+        
     init_tracker(
         root="CrossSteps",
         outdir=base_run_name,
@@ -35,8 +38,8 @@ def main():
     log.setLevel(logging.DEBUG if S.get("debug", False) else logging.INFO)
 
     graphs = create_graphs(manifest)
-    base_association_config = build_association_config(S, run_mode)
-
+    base_association_config = build_association_config(S, run_mode, tracker_residues)
+    
     if run_mode == "all":
         target_dir = base_output_path / "ALL"
         run_association_task(
@@ -46,6 +49,7 @@ def main():
             association_config=base_association_config,
             log=log
         )
+
 
     elif run_mode == "pair":
         pair_base_dir = base_output_path / "PAIR"
@@ -72,6 +76,12 @@ def main():
             
     else:
         log.error(f"Unknown run_mode: {run_mode}. Please use 'all' or 'pair'.")
+
+    if tracker_residues is not None:
+        out_path = tracker_residues.dump_json()
+        log.info(f"Residue tracking report saved to: {out_path}")
+
+
 
 if __name__ == "__main__":
     main()
