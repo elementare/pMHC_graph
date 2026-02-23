@@ -952,6 +952,7 @@ def _build_threshold_matrix(nodes, maps, threshold_cfg):
     return T
 
 def create_coherent_matrices(nodes, matrices: dict, maps: dict, threshold: Union[float, Dict] = 3.0):
+    # Verify the impact of std in distances. Suppose that 9 proteins have a simillar distance but one has a higher distance, how much does it impact?
     dim = len(nodes[0])
     K = len(nodes) 
 
@@ -1066,15 +1067,13 @@ def execute_step(
         "mem_after_mb": None,
     }
 
-    if debug:
-        print(f"[DEBUG] Step {step_idx} started. Memory: {step_mem_before:.2f} MB")
+    log.debug(f"[DEBUG] Step {step_idx} started. Memory: {step_mem_before:.2f} MB")
 
     for chunk_idx, chunk_triads in enumerate(chunks):
         chunk_time_start = time.perf_counter()
         chunk_mem_before = get_memory_usage_mb()
 
-        if debug:
-            print(f"[DEBUG]   Chunk {chunk_idx}: started. "
+        log.debug(f"[DEBUG]   Chunk {chunk_idx}: started. "
                   f"Memory before: {chunk_mem_before:.2f} MB. "
                   f"Chunk size: {len(chunk_triads)}")
 
@@ -1097,35 +1096,33 @@ def execute_step(
         chunk_time_end = time.perf_counter()
         chunk_mem_after = get_memory_usage_mb()
 
-        if debug:
-            print(f"[DEBUG]   Chunk {chunk_idx}: finished. "
-                  f"Time: {chunk_time_end - chunk_time_start:.3f}s. "
-                  f"Memory after: {chunk_mem_after:.2f} MB.")
+        log.debug(f"[DEBUG]   Chunk {chunk_idx}: finished. "
+              f"Time: {chunk_time_end - chunk_time_start:.3f}s. "
+              f"Memory after: {chunk_mem_after:.2f} MB.")
 
-            chunk_profile = {
-                "chunk_idx": chunk_idx,
-                "num_triads_in_chunk": len(chunk_triads),
-                "time_sec": chunk_time_end - chunk_time_start,
-                "mem_before_mb": chunk_mem_before,
-                "mem_after_mb": chunk_mem_after,
-            }
-            step_profile["chunks"].append(chunk_profile)
-
-
-    if debug:
-        step_time_end = time.perf_counter()
-        step_mem_after = get_memory_usage_mb()
+        chunk_profile = {
+            "chunk_idx": chunk_idx,
+            "num_triads_in_chunk": len(chunk_triads),
+            "time_sec": chunk_time_end - chunk_time_start,
+            "mem_before_mb": chunk_mem_before,
+            "mem_after_mb": chunk_mem_after,
+        }
+        step_profile["chunks"].append(chunk_profile)
 
 
-        print(f"[DEBUG] Step {step_idx} finished. "
-              f"Total time: {step_time_end - step_time_start:.3f}s. "
-              f"Final memory: {step_mem_after:.2f} MB\n")
+    step_time_end = time.perf_counter()
+    step_mem_after = get_memory_usage_mb()
 
-        step_profile["time_sec"] = step_time_end - step_time_start
-        step_profile["mem_before_mb"] = step_mem_before
-        step_profile["mem_after_mb"] = step_mem_after
 
-        profiling["steps"].append(step_profile)
+    log.debug(f"[DEBUG] Step {step_idx} finished. "
+          f"Total time: {step_time_end - step_time_start:.3f}s. "
+          f"Final memory: {step_mem_after:.2f} MB\n")
+
+    step_profile["time_sec"] = step_time_end - step_time_start
+    step_profile["mem_before_mb"] = step_mem_before
+    step_profile["mem_after_mb"] = step_mem_after
+
+    profiling["steps"].append(step_profile)
 
     return new_filtered_cross_combos, all_step_graphs
 
@@ -1263,7 +1260,7 @@ def process_chunk(step_idx, chunk_idx, chunk_triads, graphs_data, global_state, 
         if not debugar_:
             tracer.enabled = False
         
-        end = True if step_idx == steps else False
+        steps_end = True if step_idx == steps else False
         frames, union_graph, error = generate_frames(
             component_graph=subG,
             matrices=coherent_matrices,
@@ -1275,7 +1272,7 @@ def process_chunk(step_idx, chunk_idx, chunk_triads, graphs_data, global_state, 
             debug=debugar_,
             tracer=tracer,
             nodes=nodes,
-            end=end,
+            steps_end=steps_end,
             residue_tracker=residue_tracker
         )
 
@@ -1394,7 +1391,6 @@ def association_product(graphs_data: list,
     save("association_product", "inv_maps", inv_maps)
 
     for i, graph in enumerate(graph_collection["graphs"]):
-
         graph_length = len(graph.nodes())
         new_index = current_index + graph_length
         dm_adjacent[current_index:new_index, current_index:new_index] = matrices_dict["adjacent_contact_maps"][i]
@@ -1452,13 +1448,13 @@ def association_product(graphs_data: list,
 
     if debug:
         write_json_raw("profiling_report.json", profiling)
-        print("[DEBUG] Profiling report saved to association_product/profiling_report.json")
+        log.debug("[DEBUG] Profiling report saved to association_product/profiling_report.json")
 
     return {
         "AssociatedGraph": final_graphs
     }         
 
-def generate_frames(component_graph, matrices, maps, len_component, chunk_id, step, config, debug=False, debug_every=5000, tracer: Optional[TraversalTracer]=None, nodes=None, end=False, residue_tracker: Optional[ResidueTracker]=None):
+def generate_frames(component_graph, matrices, maps, len_component, chunk_id, step, config, debug=False, debug_every=5000, tracer: Optional[TraversalTracer]=None, nodes=None, steps_end=False, residue_tracker: Optional[ResidueTracker]=None):
     """
     Build frames by branching on coherent groups of the frontier.
 
@@ -1475,7 +1471,7 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
     np.fill_diagonal(dm_raw, 1)
     np.fill_diagonal(adj_raw, np.nan)
 
-    C = (dm_raw == 1)     # Matriz de coerência na forma booleana (os cálculos são mais rápidos)
+    C = (dm_raw == 1)     # Matriz de coerência na forma booleana
     A = (adj_raw == 1)    # Matriz de adjacência na forma booleana
 
     np.fill_diagonal(C, True)
@@ -1494,9 +1490,6 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
         )
 
     node_to_idx = {node: idx for idx, node in enumerate(nodes)}
-
-    N_adj = [np.nonzero(A[u])[0] for u in range(K)]
-
     frames = {}
 
     edges_base = set()
@@ -1546,7 +1539,7 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
         # if int(deg.sum() // 2) < 4:
         #     return False, set()
 
-        if np.any(deg < 1):
+        if np.any(deg < 1): # Colocar para reportar grafos com mais de 1 componente
             return False, set()
 
         # Extrai as arestas do subgrafo: usamos apenas a parte triangular superior para evitar duplicatas
@@ -1630,19 +1623,19 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
     def expand_groups(chosen, inter_mask, frontier):
         # Achar os grupos de nós coerentes em nossa fronteira é equivalente a converter a nossa fronteira
         # Em um grafo de coerência e então procrurarmos o clique máximo nele
-        groups = maximal_cliques(frontier) if frontier else []
-        if not groups:
-            groups = tuple((v,) for v in sorted(frontier))
-        out = []
-        for grp in groups:
+        cliques = maximal_cliques(frontier) if frontier else []
+        if not cliques:
+            cliques = tuple((v,) for v in sorted(frontier))
+        groups = []
+        for clc in cliques:
             inter_g = inter_mask.copy()
-            for u in grp:
-                inter_g &= C[u]
-            chosen_g = tuple(sorted(set(chosen) | set(grp)))
+            for node in clc:
+                inter_g &= C[node]
+            chosen_g = tuple(sorted(set(chosen) | set(clc)))
             frontier_g = frontier_for(np.asarray(chosen_g, dtype=np.int32), inter_g)
             sig = (chosen_g, mask_signature(inter_g))
-            out.append((sig, chosen_g, inter_g, frontier_g))
-        return out
+            groups.append((sig, chosen_g, inter_g, frontier_g))
+        return groups
 
     # ordem de nodes por grau
     deg_all = A.sum(axis=1)
@@ -1658,13 +1651,13 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
     pushes = pops = accepts = 0
     pruned_dupe_state = 0
 
-    if debug: log.debug("Traversing nodes in descending order of degree ")
+    log.debug("Traversing nodes in descending order of degree ")
     for node_id, node in enumerate(order_all): # Percorremos os nós na ordem do maior grau para o menor grau
         # if tracer and tracer.enabled:
         #     # passa a matriz A do componente que você está explorando aqui; se for o grafo inteiro A, serve
         #     tracer.start_anchor(anchor=int(node), A_sub=A, nodes_map=np.arange(A.shape[0], dtype=int))
         str_node = f"{node_id}/{len_order}"
-        if debug: log.debug(f"Node: {str_node}") 
+        log.debug(f"Node: {str_node}") 
         log.debug(f"[{str_node}] Making copy of inter list...")
         inter = C[int(node)].copy() # Primeiro começamos pegando a linha de coerência que representa o nó e fazemos uma cópia dela (para não modificar o original)
         log.debug(f"[{str_node}] Copy finished")
@@ -1708,15 +1701,15 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
         O retorno é uma lista de assinaturas 'sig' para deduplicar estados (chosen, máscara, fronteira), e as tuplas (chosen_g, inter_g, frontier_g)
         que formam os filhos do estado atual no backtracking. Dessa forma exploramos ramos por “pacotes coerentes”, sem eliminar à força toda a fronteira.
         """
-        if debug: log.debug(f"[{str_node}] Creating groups...")
+        log.debug(f"[{str_node}] Creating groups...")
         groups = expand_groups(accepted, inter, frontier)
-        if debug: log.debug(f"[{str_node}] Groups created: {len(groups)}")
+        log.debug(f"[{str_node}] Groups created: {len(groups)}")
         # print(groups)
-        if debug: log.debug(f"[{str_node}] Adding to tracer...")
+        # log.debug(f"[{str_node}] Adding to tracer...")
         # if tracer and tracer.enabled:
         #     tracer.tick(current=int(node), chosen=accepted, frontier=frontier)
 
-        if debug: log.debug(f"[{str_node}] Adding to stack...")
+        log.debug(f"[{str_node}] Adding to stack...")
 
         for i, (sig, chosen_g, inter_g, frontier_g) in enumerate(groups):
             log.debug(f"[{str_node}] {i}/{len(groups)} group")
@@ -1732,7 +1725,7 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
             stack.append((chosen_g, inter_g, frontier_g, added))
             stack_small.append((chosen_g, frontier_g))
             pushes += 1
-        if debug: log.debug(f"[{str_node}] Stack created.")
+        log.debug(f"[{str_node}] Stack created.")
         to_break = False
         # Log inicial para este nó-semente: quantos estados entraram na pilha e um snapshot compacto.
         # log.debug(f"[node {int(node)}] inicializado com {len(stack)} stack | {stack_small}")
@@ -1742,7 +1735,7 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
         while stack:
             current_stack+=1
             str_stack = f"{str_node}|{current_stack}"
-            if debug: log.debug(f"[{str_node}] Current stack: {current_stack}")
+            log.debug(f"[{str_node}] Current stack: {current_stack}")
             chosen_t, inter_m, frontier_t, added_t = stack.pop()
             # if tracer and tracer.enabled:
             #     tracer.tick(current=added_t if added_t else (),
@@ -1752,12 +1745,12 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
             chosen = list(chosen_t)
             frontier = set(frontier_t)
 
-            if debug: log.debug(f"[{str_stack}] Expanding group")
-            # 1) primeiro tenta expandir (gerar filhos)
+            log.debug(f"[{str_stack}] Expanding group")
+            # primeiro tenta expandir
             children = []
             groups_s = expand_groups(chosen_t, inter_m, frontier)
             
-            if debug: log.debug(f"[{str_stack}] Finished expanding groups: {groups_s} ")
+            log.debug(f"[{str_stack}] Finished expanding groups: {groups_s} ")
 
             for sig, c_g, m_g, f_g in groups_s:
                 if sig in visited_states:
@@ -1768,21 +1761,21 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
                 children.append((c_g, m_g, f_g, added))
 
             if children:
-                if debug: log.debug(f"[{str_stack}] Found childrens, putting in the stack: {children}")
+                log.debug(f"[{str_stack}] Found childrens, putting in the stack: {children}")
                 # ainda há filhos: empilha e segue a busca
                 stack.extend(children)
                 pushes += len(children)
             else:
                 # 2) nó-folha: avaliamos aceitação do subgrafo
-                if debug: log.debug(f"[{str_stack}] Reached the leaf, avaliating...")
+                log.debug(f"[{str_stack}] Reached the leaf, avaliating...")
                 if len(chosen) >= 4:
-                    if debug: log.debug(f"[{str_stack}] Len of chose: {len(chosen)}")
+                    log.debug(f"[{str_stack}] Len of chose: {len(chosen)}")
                     cn = frozenset(chosen)
                     if cn not in checked_node_sets:
                         checked_node_sets.add(cn)
-                        if debug: log.debug(f"[{str_stack}] Checking if it's a valid subraph...")
+                        log.debug(f"[{str_stack}] Checking if it's a valid subraph...")
                         ok, es = valid_subgraph(chosen)
-                        if debug: log.debug(f"[{str_stack}] Check finished")
+                        log.debug(f"[{str_stack}] Check finished")
                         if ok:
                             # chave canônica das arestas: pares (u<v), conjunto não-ordenado
                             edge_key = frozenset(tuple(sorted(e)) for e in es)
@@ -1793,9 +1786,9 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
                                 #                 chosen=chosen,
                                 #                 frontier=(),
                                 #                 accepted_edges_latest=es)
-                                if debug: log.debug(f"[{str_stack}] Converting edges...")
+                                log.debug(f"[{str_stack}] Converting edges...")
                                 _, edges_idx, edges_res = convert_edges_to_residues(es, maps)
-                                if debug: log.debug(f"[{str_stack}] Conversion finished.")
+                                log.debug(f"[{str_stack}] Conversion finished.")
                                 frames[next_frame_id] = {
                                     "edges_indices": edges_idx,
                                     "edges_residues": edges_res,
@@ -1808,7 +1801,7 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
                                     residue_tracker.frame_accepted(ctx=ctx, edges_residues=edges_res, edges_indices=edges_idx)
 
                 else:
-                    if debug: log.debug(f"Chose have len < 4: {len(chosen)}")
+                    log.debug(f"Chose have len < 4: {len(chosen)}")
 
             if (pops % debug_every == 0):
                 log.debug(
@@ -1829,7 +1822,7 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
         #         log.debug(f"[{str_node}][viz] salvo: {out_file}")
 
     
-    if debug: log.debug("Sorting frames...")
+    log.debug("Sorting frames...")
 
     def canon_edge(e):
         """Retorna a aresta em forma canônica (u, v) sem alterar a ordem interna dos nós."""
@@ -1848,19 +1841,19 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
         Remove frames que são subconjuntos de outros (mantém apenas os máximos por inclusão),
         mantendo o frame base (id=0) como o primeiro no resultado final.
         """
-        if debug: log.debug("Starting subframe filtering...")
+        log.debug("Starting subframe filtering...")
 
         # 1) separar frame base
         base0 = frames.get(0)
         items = [(fid, frames[fid]) for fid in frames if fid != 0]
 
-        if debug:
-            log.debug(f"Found {len(items)} non-base frames to process.")
-            if base0 is not None:
-                log.debug("Frame 0 detected and will be re-added at the end as base frame.")
+    
+        log.debug(f"Found {len(items)} non-base frames to process.")
+        if base0 is not None:
+            log.debug("Frame 0 detected and will be re-added at the end as base frame.")
 
         # 2) ordenar por tamanho canônico de arestas (decrescente)
-        if debug: log.debug("Canonicalizing and sorting frames by edge count...")
+        log.debug("Canonicalizing and sorting frames by edge count...")
         items_sorted = sorted(
             ((fid, fr, canon_edges(fr["edges_indices"])) for fid, fr in items),
             key=lambda t: -len(t[2])
@@ -1877,22 +1870,19 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
         total = len(items_sorted)
         for idx, (fid, fr, es) in enumerate(items_sorted):
             if any(es.issubset(k) for k in kept_sets):
-                if debug:
-                    log.debug(f"[{idx}/{total}] Frame {fid} skipped (subset of existing).")
+                log.debug(f"[{idx}/{total}] Frame {fid} skipped (subset of existing).")
                 continue
 
             # remove qualquer conjunto estritamente menor já contido nesse novo
             to_drop = [k for k in kept_sets if k.issubset(es) and k != es]
             if to_drop:
-                if debug:
-                    log.debug(f"[{idx}/{total}] Frame {fid} supersedes {len(to_drop)} smaller frames.")
+                log.debug(f"[{idx}/{total}] Frame {fid} supersedes {len(to_drop)} smaller frames.")
                 kept_sets = [k for k in kept_sets if k not in to_drop]
 
             kept_sets.append(es)
             kept_frames.append(fr)
 
-            if debug:
-                log.debug(f"[{idx}/{total}] Frame {fid} accepted. Total kept: {len(kept_frames)}")
+            log.debug(f"[{idx}/{total}] Frame {fid} accepted. Total kept: {len(kept_frames)}")
 
         # 4) montar final_frames com frame 0 na frente
         final_frames = {}
@@ -1905,13 +1895,12 @@ def generate_frames(component_graph, matrices, maps, len_component, chunk_id, st
             final_frames[fid_out] = fr
             fid_out += 1
 
-        if debug:
-            log.debug(f"Subframe filtering complete: {len(final_frames)} frames kept total "
+        log.debug(f"Subframe filtering complete: {len(final_frames)} frames kept total "
                       f"({len(kept_frames)} non-base + base0).")
 
         return final_frames
 
-    if end:
+    if steps_end:
         final_frames = filter_subframes(frames, debug=debug)
     else:
         final_frames = frames
