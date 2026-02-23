@@ -49,11 +49,12 @@ def load_manifest(manifest_path: str) -> Dict[str, Any]:
 
     S.setdefault("filter_triads_by_chain", None)
     S.setdefault("classes", {})
-
+    
+    S.setdefault("watch_residues", None)
 
     return data
 
-def build_association_config(settings: Dict[str, Any], run_mode: str) -> Dict[str, Any]:
+def build_association_config(settings: Dict[str, Any], run_mode: str, tracker_residues) -> Dict[str, Any]:
     """
     Build the association_config dict passed to AssociatedGraph.
 
@@ -82,5 +83,6 @@ def build_association_config(settings: Dict[str, Any], run_mode: str) -> Dict[st
         "max_chunks":               settings.get("max_chunks"),
         "rsa_table":                settings.get("rsa_table", "Wilke"),
         "filter_triads_by_chain":   settings.get("filter_triads_by_chain", None),
+        "watch_residues":           tracker_residues
     }
 

@@ -70,3 +70,14 @@ The pipeline is configured via a JSON manifest file, which defines execution set
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+
+# TODO
+
+Transformar as letras para palavras no structures, e.g Helix em vez de H. 
+
+Mudar exclude_waters -> include_waters
+
+Sincronizar o build_contact_maps() com a forma de pegar as coordenadas do Graph
+
+Confirmar a parte do Sharkley-Rupre
