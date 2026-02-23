@@ -2,7 +2,7 @@
     "settings": {
         "run_name": "batch_11_seed53",
         "run_mode": "all",
-        "max_chunks": 3,
+        "max_chunks": 5,
         "debug": true,
         "track_steps": false,
         "rsa_table": "Wilke",

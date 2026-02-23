@@ -875,11 +875,11 @@ class AssociatedGraph:
 
                 if save:
                     if i == 0 and j == 0:
-                        filename = "Full Associated Graph Base.html"
+                        filename = "Associated Graph.html"
                     elif i == 0 and j != 0:
-                        filename = f"{j} - Associated Graph Base.html"
+                        filename = f"Associated Graph Component {j}.html"
                     else:
-                        filename = f"{j} - Associated Graph {i}.html"
+                        filename = f"Associated Graph Component {j} Frame {i}.html"
                     full = out_dir / filename
                     html = net.generate_html(
                         notebook=False,

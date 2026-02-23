@@ -1,8 +1,9 @@
+from __future__ import annotations 
 from immunograph.core.residue_tracking import ResidueTracker, TrackCtx
 from immunograph.core.tracking import save
 
 import numpy as np
-from itertools import combinations, product
+from itertools import combinations, product, chain
 from Bio.PDB.Atom import Atom
 from Bio.PDB.Residue import Residue
 from Bio.PDB.PDBParser import PDBParser
@@ -12,7 +13,7 @@ import time
 from os import path
 import os
 import pandas as pd
-from typing import Any, FrozenSet, Tuple, List, Optional, Union, Dict, Set, Iterable, Sequence, TypeVarTuple, Unpack
+from typing import Any, FrozenSet, Tuple, List, Optional, Union, Dict, Set, Iterable, Sequence#, TypeVarTuple, Unpack
 import logging
 import matplotlib.pyplot as plt
 from sklearn.metrics.pairwise import cosine_similarity
@@ -23,11 +24,11 @@ from immunograph.utils.vis_tracer import TraversalTracer
 
 log = logging.getLogger("CRSProtein")
 
-Ts = TypeVarTuple("Ts")
+#Ts = TypeVarTuple("Ts")
 
-Triad = Tuple[str, str, str, Unpack[Ts]]
-Combo = Tuple[Triad, ...]
-Filtered = Dict[Tuple, List[Combo]]
+# Triad = Tuple[str, str, str, Unpack[Ts]]
+# Combo = Tuple[Triad, ...]
+# Filtered = Dict[Tuple, List[Combo]]
 
 def save_pdb_with_spheres(atomic_data, selected_residues_data, pdb_filename):
     """
@@ -506,7 +507,7 @@ def triad_chirality_with_cb(
 
 
 def find_triads(graph_data, classes, config, checks, protein_index, tracker: Optional[ResidueTracker] = None):
-    print(f"protein_index: {protein_index}")
+    # print(f"protein_index: {protein_index}")
     ctx = TrackCtx(run_id=config.get("run_id", "default"), stage="triads", protein_i=protein_index)
 
     G = graph_data["graph"]
@@ -785,94 +786,199 @@ def cross_protein_triads(step_idx, chunk_idx, triads_per_protein, diff, check_di
     """
     common_tokens = set.intersection(*(set(d.keys()) for d in triads_per_protein))
     cross = dict()
+
+    # ---------- helpers ----------
+    def _index_by_abs_d1(triads_abs_d1_list):
+        """
+        triads_abs_d1_list: lista de triads_absolute já ordenada por d1
+        retorna índice -> posição na lista original (a própria ordem serve)
+        """
+        return list(range(len(triads_abs_d1_list)))
+
+    def _build_sorted_key_list(records, k):
+        """
+        records: lista de triads_absolute
+        k: -3, -2, -1 para d1,d2,d3
+        retorna keys e pares (key, idx)
+        """
+        pairs = sorted((rec[k], i) for i, rec in enumerate(records))
+        keys = [x for x, _ in pairs]
+        return keys, pairs
+
+    def _range_ids(keys, pairs, lo, hi):
+        L = bisect.bisect_left(keys, lo)
+        R = bisect.bisect_right(keys, hi)
+        return {pairs[j][1] for j in range(L, R)}
+
     for token in common_tokens:
-        triads_len = [len(prot[token]["triads_full"]) for prot in triads_per_protein] if check_distances else [len(prot[token]) for prot in triads_per_protein] 
-        prod_triads = math.prod(triads_len)
-        # if prod_triads > 5000: 
+        if check_distances:
+            triads_len = [len(prot[token].get("triads_full", [])) for prot in triads_per_protein]
+        else:
+            triads_len = [len(prot[token].get("triads_full", [])) for prot in triads_per_protein]
+        prod_triads = math.prod(triads_len) if triads_len else 0
         log.debug(f"Token: {token} | Qtd in each protein: {triads_len} | Total teoric combinations: {prod_triads}")
+
     for token in common_tokens:
         if check_distances:
             # obter listas absolutas por proteína para este token
-            abs_lists = [prot[token]["triads_absolute_d1"] for prot in triads_per_protein]
-            # construir índices por proteína
-            idxs = [_build_index(lst) for lst in abs_lists]
-            # print(f"idxs: {idxs}")
-            sizes = [len(x["records"]) for x in idxs]
-            if any(s == 0 for s in sizes):
-                continue  
+            abs_d1_lists = [prot[token].get("triads_absolute_d1", []) for prot in triads_per_protein]
+            if any(len(lst) == 0 for lst in abs_d1_lists):
+                continue
 
-            # escolher a proteína com menor lista como referência
+            full_lists = [prot[token].get("triads_full", []) for prot in triads_per_protein]
+            abs_lists  = [prot[token].get("triads_absolute", []) for prot in triads_per_protein]
+
+            look_full = []
+            look_abs  = []
+            for p in range(len(triads_per_protein)):
+                m_full = {}
+                for t_full in full_lists[p]:
+                    # t_full não tem d1,d2,d3 absolutos; não dá pra mapear por ele sozinho.
+                    # Então vamos mapear pelo prefixo (u,c,w, chi, rsa1,rsa2,rsa3) e deixar resolver com abs via triads_absolute
+                    key = t_full[:-3]
+                    m_full.setdefault(key, []).append(t_full)
+                look_full.append(m_full)
+
+                m_abs = {}
+                for t_abs in abs_lists[p]:
+                    key = t_abs[:-3]
+                    m_abs.setdefault(key, []).append(t_abs)
+                look_abs.append(m_abs)
+
+            idxs = []
+            for recs in abs_d1_lists:
+                keys_d1, by_d1 = _build_sorted_key_list(recs, -3)
+                keys_d2, by_d2 = _build_sorted_key_list(recs, -2)
+                keys_d3, by_d3 = _build_sorted_key_list(recs, -1)
+                idxs.append({
+                    "records": recs,
+                    "keys_d1": keys_d1, "by_d1": by_d1,
+                    "keys_d2": keys_d2, "by_d2": by_d2,
+                    "keys_d3": keys_d3, "by_d3": by_d3,
+                })
+
             ref_p = min(range(len(idxs)), key=lambda p: len(idxs[p]["records"]))
-            # print(f"Ref_p: {ref_p}")
-            ref_idx = idxs[ref_p]
-            # print(f"Ref_idx: {ref_idx}")
             other_ps = [p for p in range(len(idxs)) if p != ref_p]
+            ref_records = idxs[ref_p]["records"]
 
-            combos = []  # combinações completas para este token
+            combos_full = []
+            combos_abs  = []
+            combos_abs_d1 = []
 
-            for ref_rec in ref_idx["records"]:
+            w1 = w2 = w3 = diff
+
+            for ref_rec in ref_records:
                 d1_ref, d2_ref, d3_ref = ref_rec[-3], ref_rec[-2], ref_rec[-1]
 
-                w1 = w2 = w3 = diff
-
-                all_candidates = []
+                candidates_by_p = []
                 ok = True
                 for p in other_ps:
                     idx = idxs[p]
                     cand1 = _range_ids(idx["keys_d1"], idx["by_d1"], d1_ref - w1, d1_ref + w1)
-
-                    if not cand1:
-                        ok = False
-                        break
+                    if not cand1: ok = False; break
                     cand2 = _range_ids(idx["keys_d2"], idx["by_d2"], d2_ref - w2, d2_ref + w2)
-
-                    if not cand2:
-                        ok = False
-                        break
-
+                    if not cand2: ok = False; break
                     cand3 = _range_ids(idx["keys_d3"], idx["by_d3"], d3_ref - w3, d3_ref + w3)
-                    if not cand3:
-                        ok = False
-                        break
+                    if not cand3: ok = False; break
 
                     cands = cand1 & cand2 & cand3
-                    if not cands:
-                        ok = False
-                        break
-     
-                    all_candidates.append([idx["records"][i] for i in cands])
+                    if not cands: ok = False; break
+
+                    candidates_by_p.append([idx["records"][i] for i in cands])
+
                 if not ok:
                     continue
 
-                for tail in product(*all_candidates):
-                    if ref_p == 0:
-                        tup = (ref_rec, *tail)
-                    else:
-                        # reconstruir na ordem original das proteínas
-                        tmp = [None] * len(idxs)
-                        tmp[ref_p] = ref_rec
-                        k = 0
-                        for p in other_ps:
-                            tmp[p] = tail[k]
-                            k += 1
-                        tup = tuple(tmp)
-                    combos.append(tup)
+                for tail in product(*candidates_by_p):
+                    # montar combo_abs_d1 na ordem original das proteínas
+                    tmp_abs = [None] * len(idxs)
+                    tmp_abs[ref_p] = ref_rec
+                    k = 0
+                    for p in other_ps:
+                        tmp_abs[p] = tail[k]
+                        k += 1
+                    combo_abs_d1 = tuple(tmp_abs)
+
+                    combo_abs = combo_abs_d1  # mesmo tipo e shape
+
+                    tmp_full = []
+                    for p, t_abs in enumerate(combo_abs):
+                        key = t_abs[:-3]
+                        full_cands = look_full[p].get(key, [])
+                        if not full_cands:
+                            tmp_full = None
+                            break
+                        tmp_full.append(full_cands[0])
+                    if tmp_full is None:
+                        continue
+
+                    combos_abs_d1.append(combo_abs_d1)
+                    combos_abs.append(combo_abs)
+                    combos_full.append(tuple(tmp_full))
+
+            if not combos_full:
+                continue
+
+            cross[token] = {
+                "count": len(combos_full),
+                "triads_full": combos_full,
+                "triads_absolute": combos_abs,
+                "triads_absolute_d1": combos_abs_d1,
+            }
         else:
-            list_triads_token = [prot[token] for prot in triads_per_protein]
-            combos_prod = product(*list_triads_token)
-            combos = [tuple(sum(inner, ())) for inner in combos_prod]
-        # cross["full"][token] = combos
-        cross[token] = combos
+            def _is_triad(x):
+                # triad: (U, C, W, ..., d1,d2,d3) então x[0] é string tipo "A:GLU:19"
+                return isinstance(x, tuple) and len(x) >= 3 and isinstance(x[0], str) and ":" in x[0]
+
+            def _is_combo(x):
+                # combo: tuple of triads, então x[0] é uma triad
+                return isinstance(x, tuple) and len(x) > 0 and _is_triad(x[0])
+
+            def _ensure_combo(item):
+                # item pode ser triad ou combo
+                if _is_combo(item):
+                    return item
+                if _is_triad(item):
+                    return (item,)
+                raise TypeError(f"Expected triad or combo, got {type(item)}: {item}")
+
+            lists_full = [[_ensure_combo(c) for c in prot[token].get("triads_full", [])] for prot in triads_per_protein]
+            lists_abs  = [[_ensure_combo(c) for c in prot[token].get("triads_absolute", [])] for prot in triads_per_protein]
+
+            if any(len(lst) == 0 for lst in lists_full) or any(len(lst) == 0 for lst in lists_abs):
+                continue
+
+            combos_full = []
+            combos_abs  = []
+
+            for inner_full, inner_abs in zip(product(*lists_full), product(*lists_abs)):
+                flat_full = tuple(chain.from_iterable(inner_full))
+                flat_abs  = tuple(chain.from_iterable(inner_abs))
+
+                combos_full.append(flat_full)
+                combos_abs.append(flat_abs)
+
+
+            if not combos_full:
+                continue
+
+            cross[token] = {
+                "count": len(combos_full),
+                "triads_full": combos_full,
+                "triads_absolute": combos_abs,
+                "triads_absolute_d1": combos_abs
+            }
 
     return cross
 
-def build_graph_from_cross_combos(cross_combos: Filtered) -> Set[Tuple[Tuple[str, ...], Tuple[str, ...]]]:
+def build_graph_from_cross_combos(cross_combos) -> Set[Tuple[Tuple[str, ...], Tuple[str, ...]]]:
     """
     Para cada combo aprovado, cria as arestas (C,U) e (C,W) nos nós alinhados.
     Retorna um set de arestas entre nós-tupla (um rótulo por proteína).
     """
     edges: Set[Tuple[Tuple[str, ...], Tuple[str, ...]]] = set()
-    for _token, combos in cross_combos.items():
+    for _, data in cross_combos.items():
+        combos = data.get("triads_full", [])
         for combo in combos: 
             try:
                 U = tuple(tri[0] for tri in combo)
@@ -888,11 +994,12 @@ def build_graph_from_cross_combos(cross_combos: Filtered) -> Set[Tuple[Tuple[str
 
     return edges
 
-def rebuild_cross_combos(cross_combos: Dict[Tuple, List[Tuple[Tuple, ...]]], graph_nodes):
-    cross_combos_new = {}
+def rebuild_cross_combos(cross_combos: Dict[Dict, List[Tuple[Tuple, ...]]], graph_nodes):
+    new = {}
     graph_nodes = set(graph_nodes)
 
-    for _token, combos in cross_combos.items():
+    for token, data in cross_combos.items():
+        combos = data.get("triads_full", [])
         keep = []
         for combo in combos:
             U = tuple(tri[0] for tri in combo)
@@ -901,8 +1008,15 @@ def rebuild_cross_combos(cross_combos: Dict[Tuple, List[Tuple[Tuple, ...]]], gra
             if {U, C, W} <= graph_nodes:
                 keep.append(combo)
         if keep:
-            cross_combos_new[_token] = keep
-    return cross_combos_new
+            new[token] = {
+                "count": len(keep),
+                "triads_full": keep,
+                # mantém as outras listas caso você queira continuar carregando
+                "triads_absolute": data.get("triads_absolute", []),
+                "triads_absolute_d1": data.get("triads_absolute_d1", []),
+            }
+
+    return new
 
 def parse_node(node: str) -> Tuple[str, str, int]:
     chain, res, num = node.split(":")
@@ -970,7 +1084,7 @@ def create_coherent_matrices(nodes, matrices: dict, maps: dict, threshold: Union
         idx = [node[p] for node in nodes]
 
         for i in range(K):
-            stacked_induced[p,  i, :] = matrices["dm_inducedd"][idx[i],  idx]
+            stacked_induced[p,  i, :] = matrices["dm_induced"][idx[i],  idx]
             stacked_adjacent[p, i, :]  = matrices["dm_adjacent"][idx[i], idx]
 
     mask_invalid_induced = np.any((stacked_induced == 0) | np.isnan(stacked_induced), axis=0)
@@ -1136,7 +1250,8 @@ def process_chunk(step_idx, chunk_idx, chunk_triads, graphs_data, global_state, 
     steps = global_state["steps"]
 
     max_chunks = config["max_chunks"]
-
+    if len(chunk_triads) == 1:
+        return chunk_triads, []
     if step_idx == 1:
         log.debug(f"[step {step_idx}] Creating combos | Chunk: {chunk_idx}")
         cross_combos = cross_protein_triads(step_idx, chunk_idx, chunk_triads, config["distance_diff_threshold"])
@@ -1297,7 +1412,7 @@ def process_chunk(step_idx, chunk_idx, chunk_triads, graphs_data, global_state, 
     else:
         rebuilt_combos = None
         final_graphs.insert(0, ([G], 0))
-
+    
     return rebuilt_combos, final_graphs
 
 
