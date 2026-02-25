@@ -1413,7 +1413,7 @@ def process_chunk(step_idx, chunk_idx, chunk_triads, graphs_data, global_state, 
     else:
         log.debug(f"[step {step_idx}] Creating combos | Chunk: {chunk_idx}")
         cross_combos = cross_protein_triads(step_idx, chunk_idx, chunk_triads, config["distance_diff_threshold"])
-    input()
+
     if residue_tracker is not None:
         ctx = TrackCtx(run_id=config.get("run_id","default"), stage="combos", step_id=step_idx, chunk_id=chunk_idx)
         for token, combos in cross_combos.items():
