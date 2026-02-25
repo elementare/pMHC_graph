@@ -1,0 +1,770 @@
+{
+  "summary": {
+    "created_at": 1772026156.057154,
+    "num_watched": 2,
+    "counts": {
+      "triads_built": 533,
+      "combos_built": 177,
+      "component_selected": 0,
+      "component_skipped": 0,
+      "frame_accepted": 31,
+      "triad_filtered": 0
+    }
+  },
+  "watched": [
+    [
+      0,
+      "A",
+      19,
+      ""
+    ],
+    [
+      0,
+      "A",
+      44,
+      ""
+    ]
+  ],
+  "events_by_residue": {
+    "(0, 'A', 19, '')": [
+      {
+        "event": "triads_built",
+        "ctx": {
+          "run_id": "default",
+          "stage": "triads",
+          "protein_i": 0,
+          "step_id": null,
+          "chunk_id": null,
+          "comp_id": null,
+          "frame_id": null
+        },
+        "token": "('GLN', 'ARG', 'GLU', 1, None, None, None, 3, 6, 4)",
+        "num_triads_token": 1,
+        "examples": [
+          [
+            "A:GLN:72",
+            "A:ARG:75",
+            "A:GLU:19",
+            1,
+            null,
+            null,
+            null,
+            5.387425117123129,
+            10.797641913568294,
+            7.757543301657996
+          ]
+        ]
+      },
+      {
+        "event": "triads_built",
+        "ctx": {
+          "run_id": "default",
+          "stage": "triads",
+          "protein_i": 0,
+          "step_id": null,
+          "chunk_id": null,
+          "comp_id": null,
+          "frame_id": null
+        },
+        "token": "('GLU', 'ARG', 'SER', -1, None, None, None, 4, 5, 4)",
+        "num_triads_token": 1,
+        "examples": [
+          [
+            "A:GLU:19",
+            "A:ARG:75",
+            "A:SER:71",
+            -1,
+            null,
+            null,
+            null,
+            7.757543301657996,
+            9.489608037708592,
+            6.495664359230098
+          ]
+        ]
+      },
+      {
+        "event": "triads_built",
+        "ctx": {
+          "run_id": "default",
+          "stage": "triads",
+          "protein_i": 0,
+          "step_id": null,
+          "chunk_id": null,
+          "comp_id": null,
+          "frame_id": null
+        },
+        "token": "('GLU', 'ARG', 'GLY', 1, None, None, None, 4, 7, 4)",
+        "num_triads_token": 1,
+        "examples": [
+          [
+            "A:GLU:19",
+            "A:ARG:75",
+            "A:GLY:79",
+            1,
+            null,
+            null,
+            null,
+            7.757543301657996,
+            12.991913548089729,
+            7.87687173965972
+          ]
+        ]
+      },
+      {
+        "event": "triads_built",
+        "ctx": {
+          "run_id": "default",
+          "stage": "triads",
+          "protein_i": 0,
+          "step_id": null,
+          "chunk_id": null,
+          "comp_id": null,
+          "frame_id": null
+        },
+        "token": "('GLU', 'ARG', 'VAL', 1, None, None, None, 4, 7, 3)",
+        "num_triads_token": 1,
+        "examples": [
+          [
+            "A:GLU:19",
+            "A:ARG:75",
+            "A:VAL:76",
+            1,
+            null,
+            null,
+            null,
+            7.757543301657996,
+            12.879091740632756,
+            5.385084098643549
+          ]
+        ]
+      },
+      {
+        "event": "frame_accepted",
+        "ctx": {
+          "run_id": "default",
+          "stage": "frames",
+          "protein_i": null,
+          "step_id": 1,
+          "chunk_id": 0,
+          "comp_id": null,
+          "frame_id": 2
+        },
+        "num_edges": 26,
+        "examples": [
+          [
+            [
+              "A:GLU:19",
+              "A:GLU:19"
+            ],
+            [
+              "A:ARG:75",
+              "A:ARG:75"
+            ]
+          ],
+          [
+            [
+              "A:GLN:72",
+              "A:GLN:72"
+            ],
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ]
+          ],
+          [
+            [
+              "A:ARG:75",
+              "A:ARG:75"
+            ],
+            [
+              "A:VAL:76",
+              "A:VAL:76"
+            ]
+          ],
+          [
+            [
+              "A:GLY:62",
+              "A:GLY:62"
+            ],
+            [
+              "A:ARG:65",
+              "A:ARG:65"
+            ]
+          ],
+          [
+            [
+              "A:LYS:68",
+              "A:LYS:68"
+            ],
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ]
+          ],
+          [
+            [
+              "A:VAL:76",
+              "A:VAL:76"
+            ],
+            [
+              "A:GLN:72",
+              "A:GLN:72"
+            ]
+          ],
+          [
+            [
+              "A:GLY:62",
+              "A:GLY:62"
+            ],
+            [
+              "A:ASP:61",
+              "A:ASP:61"
+            ]
+          ],
+          [
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ],
+            [
+              "A:ALA:69",
+              "A:ALA:69"
+            ]
+          ]
+        ]
+      },
+      {
+        "event": "frame_accepted",
+        "ctx": {
+          "run_id": "default",
+          "stage": "frames",
+          "protein_i": null,
+          "step_id": 1,
+          "chunk_id": 0,
+          "comp_id": null,
+          "frame_id": 3
+        },
+        "num_edges": 20,
+        "examples": [
+          [
+            [
+              "A:GLU:19",
+              "A:GLU:19"
+            ],
+            [
+              "A:ARG:75",
+              "A:ARG:75"
+            ]
+          ],
+          [
+            [
+              "A:GLN:72",
+              "A:GLN:72"
+            ],
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ]
+          ],
+          [
+            [
+              "A:ARG:75",
+              "A:ARG:75"
+            ],
+            [
+              "A:VAL:76",
+              "A:VAL:76"
+            ]
+          ],
+          [
+            [
+              "A:LYS:68",
+              "A:LYS:68"
+            ],
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ]
+          ],
+          [
+            [
+              "A:VAL:76",
+              "A:VAL:76"
+            ],
+            [
+              "A:GLN:72",
+              "A:GLN:72"
+            ]
+          ],
+          [
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ],
+            [
+              "A:ALA:69",
+              "A:ALA:69"
+            ]
+          ]
+        ]
+      },
+      {
+        "event": "frame_accepted",
+        "ctx": {
+          "run_id": "default",
+          "stage": "frames",
+          "protein_i": null,
+          "step_id": 1,
+          "chunk_id": 0,
+          "comp_id": null,
+          "frame_id": 4
+        },
+        "num_edges": 19,
+        "examples": [
+          [
+            [
+              "A:GLU:19",
+              "A:GLU:19"
+            ],
+            [
+              "A:ARG:75",
+              "A:ARG:75"
+            ]
+          ],
+          [
+            [
+              "A:GLN:72",
+              "A:GLN:72"
+            ],
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ]
+          ],
+          [
+            [
+              "A:ARG:75",
+              "A:ARG:75"
+            ],
+            [
+              "A:VAL:76",
+              "A:VAL:76"
+            ]
+          ],
+          [
+            [
+              "A:LYS:68",
+              "A:LYS:68"
+            ],
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ]
+          ],
+          [
+            [
+              "A:VAL:76",
+              "A:VAL:76"
+            ],
+            [
+              "A:GLN:72",
+              "A:GLN:72"
+            ]
+          ],
+          [
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ],
+            [
+              "A:ALA:69",
+              "A:ALA:69"
+            ]
+          ]
+        ]
+      },
+      {
+        "event": "frame_accepted",
+        "ctx": {
+          "run_id": "default",
+          "stage": "frames",
+          "protein_i": null,
+          "step_id": 1,
+          "chunk_id": 0,
+          "comp_id": null,
+          "frame_id": 5
+        },
+        "num_edges": 21,
+        "examples": [
+          [
+            [
+              "A:GLU:19",
+              "A:GLU:19"
+            ],
+            [
+              "A:ARG:75",
+              "A:ARG:75"
+            ]
+          ],
+          [
+            [
+              "A:GLN:72",
+              "A:GLN:72"
+            ],
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ]
+          ],
+          [
+            [
+              "A:ARG:75",
+              "A:ARG:75"
+            ],
+            [
+              "A:VAL:76",
+              "A:VAL:76"
+            ]
+          ],
+          [
+            [
+              "A:GLY:62",
+              "A:GLY:62"
+            ],
+            [
+              "A:ARG:65",
+              "A:ARG:65"
+            ]
+          ],
+          [
+            [
+              "A:LYS:68",
+              "A:LYS:68"
+            ],
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ]
+          ],
+          [
+            [
+              "A:VAL:76",
+              "A:VAL:76"
+            ],
+            [
+              "A:GLN:72",
+              "A:GLN:72"
+            ]
+          ],
+          [
+            [
+              "A:GLY:62",
+              "A:GLY:62"
+            ],
+            [
+              "A:ASP:61",
+              "A:ASP:61"
+            ]
+          ],
+          [
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ],
+            [
+              "A:ALA:69",
+              "A:ALA:69"
+            ]
+          ]
+        ]
+      },
+      {
+        "event": "frame_accepted",
+        "ctx": {
+          "run_id": "default",
+          "stage": "frames",
+          "protein_i": null,
+          "step_id": 1,
+          "chunk_id": 0,
+          "comp_id": null,
+          "frame_id": 8
+        },
+        "num_edges": 21,
+        "examples": [
+          [
+            [
+              "A:GLU:19",
+              "A:GLU:19"
+            ],
+            [
+              "A:ARG:75",
+              "A:ARG:75"
+            ]
+          ],
+          [
+            [
+              "A:GLN:72",
+              "A:GLN:72"
+            ],
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ]
+          ],
+          [
+            [
+              "A:ARG:75",
+              "A:ARG:75"
+            ],
+            [
+              "A:VAL:76",
+              "A:VAL:76"
+            ]
+          ],
+          [
+            [
+              "A:GLY:62",
+              "A:GLY:62"
+            ],
+            [
+              "A:ARG:65",
+              "A:ARG:65"
+            ]
+          ],
+          [
+            [
+              "A:LYS:68",
+              "A:LYS:68"
+            ],
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ]
+          ],
+          [
+            [
+              "A:VAL:76",
+              "A:VAL:76"
+            ],
+            [
+              "A:GLN:72",
+              "A:GLN:72"
+            ]
+          ],
+          [
+            [
+              "A:GLY:62",
+              "A:GLY:62"
+            ],
+            [
+              "A:ASP:61",
+              "A:ASP:61"
+            ]
+          ],
+          [
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ],
+            [
+              "A:ALA:69",
+              "A:ALA:69"
+            ]
+          ]
+        ]
+      },
+      {
+        "event": "frame_accepted",
+        "ctx": {
+          "run_id": "default",
+          "stage": "frames",
+          "protein_i": null,
+          "step_id": 1,
+          "chunk_id": 0,
+          "comp_id": null,
+          "frame_id": 10
+        },
+        "num_edges": 19,
+        "examples": [
+          [
+            [
+              "A:GLU:19",
+              "A:GLU:19"
+            ],
+            [
+              "A:ARG:75",
+              "A:ARG:75"
+            ]
+          ],
+          [
+            [
+              "A:GLN:72",
+              "A:GLN:72"
+            ],
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ]
+          ],
+          [
+            [
+              "A:ARG:75",
+              "A:ARG:75"
+            ],
+            [
+              "A:VAL:76",
+              "A:VAL:76"
+            ]
+          ],
+          [
+            [
+              "A:GLY:62",
+              "A:GLY:62"
+            ],
+            [
+              "A:ARG:65",
+              "A:ARG:65"
+            ]
+          ],
+          [
+            [
+              "A:LYS:68",
+              "A:LYS:68"
+            ],
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ]
+          ],
+          [
+            [
+              "A:VAL:76",
+              "A:VAL:76"
+            ],
+            [
+              "A:GLN:72",
+              "A:GLN:72"
+            ]
+          ],
+          [
+            [
+              "A:GLY:62",
+              "A:GLY:62"
+            ],
+            [
+              "A:ASP:61",
+              "A:ASP:61"
+            ]
+          ],
+          [
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ],
+            [
+              "A:ALA:69",
+              "A:ALA:69"
+            ]
+          ]
+        ]
+      },
+      {
+        "event": "frame_accepted",
+        "ctx": {
+          "run_id": "default",
+          "stage": "frames",
+          "protein_i": null,
+          "step_id": 1,
+          "chunk_id": 0,
+          "comp_id": null,
+          "frame_id": 11
+        },
+        "num_edges": 22,
+        "examples": [
+          [
+            [
+              "A:GLU:19",
+              "A:GLU:19"
+            ],
+            [
+              "A:ARG:75",
+              "A:ARG:75"
+            ]
+          ],
+          [
+            [
+              "A:GLN:72",
+              "A:GLN:72"
+            ],
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ]
+          ],
+          [
+            [
+              "A:ARG:75",
+              "A:ARG:75"
+            ],
+            [
+              "A:VAL:76",
+              "A:VAL:76"
+            ]
+          ],
+          [
+            [
+              "A:GLY:62",
+              "A:GLY:62"
+            ],
+            [
+              "A:ARG:65",
+              "A:ARG:65"
+            ]
+          ],
+          [
+            [
+              "A:LYS:68",
+              "A:LYS:68"
+            ],
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ]
+          ],
+          [
+            [
+              "A:VAL:76",
+              "A:VAL:76"
+            ],
+            [
+              "A:GLN:72",
+              "A:GLN:72"
+            ]
+          ],
+          [
+            [
+              "A:GLY:62",
+              "A:GLY:62"
+            ],
+            [
+              "A:ASP:61",
+              "A:ASP:61"
+            ]
+          ],
+          [
+            [
+              "A:SER:71",
+              "A:SER:71"
+            ],
+            [
+              "A:ALA:69",
+              "A:ALA:69"
+            ]
+          ]
+        ]
+      }
+    ],
+    "(0, 'A', 44, '')": []
+  }
+}

@@ -794,6 +794,11 @@ def cross_protein_triads(step_idx, chunk_idx, triads_per_protein, diff, check_di
         # triad_abs tem d1, d2, d3 nas posições -3, -2, -1
         d1, d2, d3 = triad_abs[-3], triad_abs[-2], triad_abs[-1]
         return (d1, d1, d2, d2, d3, d3) # min_d1, max_d1, min_d2, max_d2, min_d3, max_d3
+
+    def _ensure_combo(item):
+            if isinstance(item[0], str) and ":" in item[0]: return (item,)
+            return item
+
     if check_distances:
         for token in common_tokens:
             prot_data = []
@@ -870,12 +875,24 @@ def cross_protein_triads(step_idx, chunk_idx, triads_per_protein, diff, check_di
                 ref_full_val = ref_data["full"][i]
 
                 for tail_indices in product(*candidates_by_p):
-                    # Coletar os bounds e valores para este combo
-                    tail_bounds = [prot_data[other_ps[k]]["bounds"][idx] for k, idx in enumerate(tail_indices)]
-                    all_bounds = [ref_bound] + tail_bounds
-                    
-                    # Checagem global estrita final em matriz pequena
-                    all_b_arr = np.array(all_bounds)
+                    ordered_full = [None] * len(prot_data)
+                    ordered_abs = [None] * len(prot_data)
+                    ordered_bounds = [None] * len(prot_data)
+
+                    ordered_full[ref_p] = ref_full_val
+                    ordered_abs[ref_p] = ref_abs_val
+                    ordered_bounds[ref_p] = ref_bound
+
+                    for k, p_idx in enumerate(other_ps):
+                        # tail_indices[k] é o índice escolhido para a proteína p_idx
+                        idx_in_prot = tail_indices[k]
+                        
+                        ordered_full[p_idx] = prot_data[p_idx]["full"][idx_in_prot]
+                        ordered_abs[p_idx] = prot_data[p_idx]["abs"][idx_in_prot]
+                        ordered_bounds[p_idx] = prot_data[p_idx]["bounds"][idx_in_prot]
+
+                    # Validação Final de Distância (usando a lista já ordenada, embora p/ math tanto faz)
+                    all_b_arr = np.array(ordered_bounds)
                     new_mins = all_b_arr[:, [0, 2, 4]].min(axis=0)
                     new_maxs = all_b_arr[:, [1, 3, 5]].max(axis=0)
                     
@@ -884,17 +901,13 @@ def cross_protein_triads(step_idx, chunk_idx, triads_per_protein, diff, check_di
 
                     new_bound = (new_mins[0], new_maxs[0], new_mins[1], new_maxs[1], new_mins[2], new_maxs[2])
 
-                    def _ensure_combo(item):
-                        if isinstance(item[0], str) and ":" in item[0]: return (item,)
-                        return item
-
-                    combo_abs = tuple(chain.from_iterable([_ensure_combo(ref_abs_val)] + [_ensure_combo(prot_data[other_ps[k]]["abs"][idx]) for k, idx in enumerate(tail_indices)]))
-                    combo_full = tuple(chain.from_iterable([_ensure_combo(ref_full_val)] + [_ensure_combo(prot_data[other_ps[k]]["full"][idx]) for k, idx in enumerate(tail_indices)]))
+                    # Flatten usando a lista ORDENADA
+                    combo_abs = tuple(chain.from_iterable(_ensure_combo(x) for x in ordered_abs))
+                    combo_full = tuple(chain.from_iterable(_ensure_combo(x) for x in ordered_full))
 
                     combos_abs.append(combo_abs)
                     combos_full.append(combo_full)
                     combos_bounds.append(new_bound)
-
             if not combos_full:
                 continue
             
