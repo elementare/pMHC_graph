@@ -1206,7 +1206,6 @@ def _build_threshold_matrix(nodes, maps, threshold_cfg):
     K = len(nodes)
     dim = len(nodes[0])
 
-    # caso seja float, retorna matriz cheia
     if not isinstance(threshold_cfg, dict):
         return np.full((K, K), float(threshold_cfg), dtype=float)
 
@@ -1256,33 +1255,22 @@ def create_coherent_matrices(nodes, matrices: dict, maps: dict, threshold: Union
     mask_invalid_induced = np.any((stacked_induced == 0) | np.isnan(stacked_induced), axis=0)
     mask_invalid_adjacent = np.any((stacked_adjacent == 0) | np.isnan(stacked_adjacent), axis=0)
 
-    stacked_induced[:, mask_invalid_induced] = np.nan
-    stacked_adjacent[:, mask_invalid_adjacent] = np.nan
-
-    var_induced = np.std(stacked_induced, axis=0)    
-    var_adjacent = np.std(stacked_adjacent, axis=0)  
-
-    mask_induced = np.any((stacked_induced == 0) | np.isnan(stacked_induced), axis=0)
-    mask_adjacent = np.any((stacked_adjacent == 0) | np.isnan(stacked_adjacent), axis=0)
-
-    var_induced = np.where(mask_induced, np.nan, var_induced)
-    var_adjacent = np.where(mask_adjacent, np.nan, var_adjacent)        
+    range_induced = np.max(stacked_induced, axis=0) - np.min(stacked_induced, axis=0)    
+    range_adjacent = np.max(stacked_adjacent, axis=0) - np.min(stacked_adjacent, axis=0) 
 
     T = _build_threshold_matrix(nodes, maps, threshold)
 
-    mask_valid = (0 < var_induced) & (var_induced < T)
-    mask_invalid = ~mask_valid
-    var_induced[mask_valid] = 1
-    var_induced[mask_invalid] = np.nan
+    mask_valid_ind = (range_induced <= T) & (~mask_invalid_induced)
+    final_induced = np.full((K, K), np.nan) 
+    final_induced[mask_valid_ind] = 1.0
 
-    mask_valid = (0 < var_adjacent) & (var_adjacent < T)
-    mask_invalid = ~mask_valid
-    var_adjacent[mask_valid] = 1
-    var_adjacent[mask_invalid] = np.nan
- 
+    mask_valid_adj = (range_adjacent <= T) & (~mask_invalid_adjacent)
+    final_adjacent = np.full((K, K), np.nan)
+    final_adjacent[mask_valid_adj] = 1.0
+
     new_matrices = {
-        "coherent_global_nodes": var_induced,
-        "coherent_adjacent_nodes": var_adjacent
+        "coherent_global_nodes": final_induced,
+        "coherent_adjacent_nodes": final_adjacent
     }
     
 
