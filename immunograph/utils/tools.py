@@ -898,7 +898,6 @@ def cross_protein_triads(step_idx, chunk_idx, triads_per_protein, diff, check_di
             if not combos_full:
                 continue
             
-            log.debug(f"{step_idx} | {chunk_idx} | bounds: {combos_bounds}")
             cross[token] = {
                 "count": len(combos_full),
                 "triads_full": combos_full,
