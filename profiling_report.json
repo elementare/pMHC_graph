@@ -3,51 +3,20 @@
   "steps": [
     {
       "step": 1,
-      "num_items": 11,
-      "num_chunks": 3,
-      "chunks": [
-        {
-          "chunk_idx": 0,
-          "num_triads_in_chunk": 5,
-          "time_sec": 19.334203484999307,
-          "mem_before_mb": 254.2890625,
-          "mem_after_mb": 255.0546875
-        },
-        {
-          "chunk_idx": 1,
-          "num_triads_in_chunk": 5,
-          "time_sec": 3.5203742859994236,
-          "mem_before_mb": 255.0546875,
-          "mem_after_mb": 257.55859375
-        },
-        {
-          "chunk_idx": 2,
-          "num_triads_in_chunk": 1,
-          "time_sec": 6.452900015574414e-05,
-          "mem_before_mb": 257.55859375,
-          "mem_after_mb": 257.55859375
-        }
-      ],
-      "time_sec": 22.85494365899831,
-      "mem_before_mb": 254.2890625,
-      "mem_after_mb": 257.55859375
-    },
-    {
-      "step": 2,
-      "num_items": 3,
+      "num_items": 2,
       "num_chunks": 1,
       "chunks": [
         {
           "chunk_idx": 0,
-          "num_triads_in_chunk": 3,
-          "time_sec": 6.38058811799965,
-          "mem_before_mb": 257.55859375,
-          "mem_after_mb": 364.453125
+          "num_triads_in_chunk": 2,
+          "time_sec": 0.1747444870002255,
+          "mem_before_mb": 307.7890625,
+          "mem_after_mb": 325.19921875
         }
       ],
-      "time_sec": 6.380703816999812,
-      "mem_before_mb": 257.55859375,
-      "mem_after_mb": 364.453125
+      "time_sec": 0.17486838700006047,
+      "mem_before_mb": 307.7890625,
+      "mem_after_mb": 325.19921875
     }
   ]
 }

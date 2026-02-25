@@ -21,7 +21,6 @@
         "distance_bin_width": 2,
         "close_tolerance": 1.0,
         "rsa_bin_width": 0.2,
-        "watch_residues": ["A:ARG:44", "A:GLU:19"],
         "_classes": {
             "residues": {
                 "HID": [
@@ -61,15 +60,10 @@
     },
     "inputs": [
         {
-            "path": "~/GithubProjects/testes_pmhc/all_11/batch_11_seed53/filtered_graphs/",
+            "path": "~/GithubProjects/testes_pmhc/teste2/",
             "enable_tui": false,
             "extensions": [
                 ".pdb"
-            ],
-            "selectors": [
-                {
-                    "name": "MHC1"
-                }
             ]
         }
     ],
