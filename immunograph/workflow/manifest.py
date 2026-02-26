@@ -33,7 +33,7 @@ def load_manifest(manifest_path: str) -> Dict[str, Any]:
 
     S.setdefault("include_ligands", True)
     S.setdefault("include_noncanonical_residues", True)
-    S.setdefault("exclude_waters", True)
+    S.setdefault("include_waters", True)
 
     S.setdefault("triad_rsa", False)
     S.setdefault("rsa_filter", 0.1)
@@ -76,7 +76,7 @@ def build_association_config(settings: Dict[str, Any], run_mode: str, tracker_re
         "close_tolerance":          settings.get("close_tolerance"),
         "close_tolerance_rsa":      settings.get("close_tolerance_rsa"),
         "checks":                   checks,
-        "exclude_waters":           settings.get("exclude_waters"),
+        "include_waters":           settings.get("include_waters"),
         "include_ligands":          settings.get("include_ligands"),
         "include_noncanonical_residues": settings.get("include_noncanonical_residues"),
         "classes":                  settings.get("classes", {}),

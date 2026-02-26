@@ -755,7 +755,7 @@ class PDBGraphBuilder:
         list of tuple
             (node_id, Residue, centroid) for waters (HOH). Empty if disabled.
         """
-        if self.config.exclude_waters:
+        if not self.config.include_waters:
             return []
         out: List[Tuple[str, Residue, np.ndarray]] = []
         for ch in chains:
@@ -1060,7 +1060,7 @@ if __name__ == "__main__":
 
     cfg = GraphConfig(
         chains=None if args.chains is None else [c.strip() for c in args.chains.split(",") if c.strip()],
-        exclude_waters=args.include_waters,
+        include_waters=args.include_waters,
         residue_distance_cutoff=args.res_cut,
         water_distance_cutoff=args.wat_cut,
         compute_rsa=not args.no_rsa,
