@@ -22,7 +22,7 @@ from pyvis.network import Network
 from immunograph.core.config import GraphConfig, make_default_config
 from immunograph.core.pipeline import build_graph_with_config
 from immunograph.core.subgraphs import extract_subgraph
-from immunograph.utils.tools import association_product,build_contact_map, add_sphere_residues
+from immunograph.utils.tools import association_product, add_sphere_residues
 
 log = logging.getLogger("CRSProtein")
 
@@ -562,7 +562,9 @@ class AssociatedGraph:
         """
         graphs_data = []
         for i, (g, pdb_file) in enumerate(self.graphs):
-            contact_map, residue_map, residue_map_all = build_contact_map(pdb_file, exclude_waters=self.association_config["exclude_waters"])
+            contact_map = g.graph["contact_map"]
+            residue_map = g.graph["residue_map_dict"]
+            residue_map_all = g.graph["residue_map_dict_all"]
           
             sorted_nodes = sorted(list(g.nodes()))
 
