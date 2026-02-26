@@ -94,7 +94,7 @@ def _eval_logic_expression(expr: str,
 def remove_water_from_pdb(source_file, dest_file):
     """Remove water molecules from a PDB or mmCIF file and save the cleaned version safely."""
     
-    if os.path.exists(dest_file):
+    if os.path.exists(dest_file) or "_nOH" in source_file:
         logger.debug(f"The file {dest_file} already exists.")
         return
 
@@ -494,7 +494,7 @@ def create_graphs(manifest: Dict) -> List[Tuple]:
     graph_config = make_default_config(
         edge_threshold=S["edge_threshold"],
         granularity=S["node_granularity"],
-        exclude_waters=S["exclude_waters"],
+        include_waters=S["include_waters"],
         dssp_acc_array=S["rsa_table"],
         include_ligands=S["include_ligands"],
         include_noncanonical_residues=S["include_noncanonical_residues"]
@@ -505,16 +505,16 @@ def create_graphs(manifest: Dict) -> List[Tuple]:
     for file_info in selected_files:
         orig_path = Path(file_info["input_path"]).resolve()
         dest_path = Path(S["output_path"]).resolve()
-        if S["exclude_waters"]:
+        if not S["include_waters"]:
             cleaned_name = file_info["name"]
             if cleaned_name.endswith(".pdb.gz"):
-                cleaned_name = cleaned_name[:-7] + "_nOH.pdb"
+                cleaned_name = cleaned_name[:-7] + "_nOH.pdb" if "_nOH.pdb" not in cleaned_name else cleaned_name
             elif cleaned_name.endswith(".pdb"):
-                cleaned_name = cleaned_name[:-4] + "_nOH.pdb"
+                cleaned_name = cleaned_name[:-4] + "_nOH.pdb" if "_nOH.pdb" not in cleaned_name else cleaned_name
             elif cleaned_name.endswith(".cif"):
-                cleaned_name = cleaned_name[:-4] + "_nOH.cif"
+                cleaned_name = cleaned_name[:-4] + "_nOH.cif" if "_nOH.cif" not in cleaned_name else cleaned_name
             else:
-                cleaned_name = cleaned_name + "_nOH.pdb"
+                cleaned_name = cleaned_name + "_nOH.pdb" if "_nOH.pdb" not in cleaned_name else cleaned_name
             cleaned_path = (dest_path.parent / cleaned_name).resolve()
             remove_water_from_pdb(str(orig_path), str(cleaned_path))
             graph_path = cleaned_path

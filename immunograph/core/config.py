@@ -85,7 +85,7 @@ class GraphConfig:
     """
     # Selection and waters
     chains: Optional[Iterable[str]] = None
-    exclude_waters: bool = False
+    include_waters: bool = True
 
     # Geometry / graph
     residue_distance_cutoff: float = 10.0
@@ -122,7 +122,6 @@ def make_default_config(
     *,
     edge_threshold: float = 10.0,
     granularity: Granularity = "all_atoms",
-    exclude_waters: bool = False,
     chains: Optional[Iterable[str]] = None,
     compute_rsa: bool = True,
     # rsa_method = "dssp",
@@ -132,7 +131,8 @@ def make_default_config(
     dssp_acc_array: Literal["Sander", "Wilke", "Miller"] = "Wilke",
     make_virtual_cb_for_gly: bool = True,
     include_noncanonical_residues: bool = True,
-    include_ligands: bool = False
+    include_ligands: bool = False,
+    include_waters: bool = True,
 ) -> GraphConfig:
     """
     Helper for creating a ``GraphConfig`` with common defaults.
@@ -163,7 +163,7 @@ def make_default_config(
     """
     return GraphConfig(
         chains=chains,
-        exclude_waters=exclude_waters,
+        include_waters=include_waters,
         residue_distance_cutoff=float(edge_threshold),
         water_distance_cutoff=6.0,
         store_distance_matrix=True,
