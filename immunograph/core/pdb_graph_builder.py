@@ -3,6 +3,7 @@ import tempfile
 
 from immunograph.core.config import GraphConfig, DSSPConfig
 from immunograph.core.metadata import secondary_structure
+from immunograph.core.contact_map import contact_map_from_graph
 
 import json
 import logging
@@ -444,6 +445,26 @@ class PDBGraphBuilder:
             mask = heavy  # ultimate fallback
         return mask
 
+    def _centroids_from_raw_df(self, raw_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Compute one centroid per node_id using the same granularity rules as edges.
+
+        Returns a DataFrame indexed by node_id with columns x_coord,y_coord,z_coord.
+        """
+        if raw_df.empty:
+            return pd.DataFrame(columns=["x_coord", "y_coord", "z_coord"]).set_index(pd.Index([], name="node_id"))
+
+        def _centroid_for_group(g: pd.DataFrame) -> pd.Series:
+            mask = self._centroid_mask_for_group(g)
+            sub = g.loc[mask, ["x_coord", "y_coord", "z_coord"]]
+            if sub.empty:
+                sub = g[["x_coord", "y_coord", "z_coord"]]
+            cx, cy, cz = sub.mean(axis=0).values.astype(float)
+            return pd.Series({"x_coord": cx, "y_coord": cy, "z_coord": cz})
+
+        out = raw_df.groupby("node_id", sort=False, group_keys=False).apply(_centroid_for_group)
+        out.index.name = "node_id"
+        return out
 
     def _extract_ca_cb(self, raw_df: pd.DataFrame) -> Dict[str, Dict[str, Tuple[float, float, float]]]:
         """
@@ -844,6 +865,7 @@ class PDBGraphBuilder:
         raw_pdb_df, pdb_df, rgroup_df = self._make_atom_tables(chains)
         pdb_df = self._centroid_pdb_df_from_raw(raw_pdb_df)
         ca_cb_map = self._extract_ca_cb(raw_pdb_df)
+        centroid_tbl = self._centroids_from_raw_df(raw_pdb_df)
         nan3 = (float("nan"), float("nan"), float("nan"))
         if not res_tuples:
             raise ValueError("No protein residues found for the selected chains.")
@@ -854,10 +876,15 @@ class PDBGraphBuilder:
             if res_tuples:
                 asa_rsa, dssp_df = self._compute_asa_rsa(res_tuples)
 
-
         res_ids = [t[0] for t in res_tuples]
         res_objects = [t[1] for t in res_tuples]
-        res_centroids = np.vstack([t[2] for t in res_tuples])
+
+        cent_rows = centroid_tbl.reindex(res_ids)
+        if cent_rows[["x_coord", "y_coord", "z_coord"]].isna().any(axis=None):
+            missing = cent_rows[cent_rows.isna().any(axis=1)].index.tolist()
+            raise ValueError(f"Missing centroid coords for node_ids: {missing[:10]}")
+
+        res_centroids = cent_rows[["x_coord", "y_coord", "z_coord"]].to_numpy(float)
 
         diff = res_centroids[:, None, :] - res_centroids[None, :, :]
         dist_mat = np.sqrt(np.sum(diff * diff, axis=2))
@@ -874,6 +901,8 @@ class PDBGraphBuilder:
             ca_coord = extra.get("ca_coord", nan3)
             cb_coord = extra.get("cb_coord", nan3)
             cb_is_virtual = bool(extra.get("cb_is_virtual", False))
+            c = centroid_tbl.loc[nid]
+            cent = np.array([c["x_coord"], c["y_coord"], c["z_coord"]], dtype=float)
 
             G.add_node(
                 nid,
@@ -958,6 +987,23 @@ class PDBGraphBuilder:
                         d = float(wdist[wi, rj])
                         if 0.0 < d <= wcut:
                             G.add_edge(water_ids[wi], res_ids[rj], distance=d, kind="wat-res")
+
+        (
+            contact_map,
+            contact_node_order,
+            residue_map_dict,
+            residue_map_dict_all,
+        ) = contact_map_from_graph(
+            G,
+            granularity=getattr(self.config, "granularity", "all_atoms"),
+            exclude_kinds=(),              # include waters if included in graph
+            fallback_to_centroid=True,
+        )
+
+        G.graph["contact_map"] = contact_map
+        G.graph["contact_map_node_order"] = contact_node_order
+        G.graph["residue_map_dict"] = residue_map_dict
+        G.graph["residue_map_dict_all"] = residue_map_dict_all
 
         rsa_series = pd.Series(
             {nid: (float(d.get("rsa")) if d.get("rsa") is not None else np.nan)
