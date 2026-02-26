@@ -656,6 +656,47 @@ def extract_subgraph_from_secondary_structure(
     ProteinGraphConfigurationError
         If any node lacks the 'ss' attribute.
     """
+
+
+    name_to_codes = {
+        "HELIX": {"H", "G", "I"},
+        "STRAND": {"B", "E"},
+        "LOOP": {"T", "S", "-"},
+
+        "ALPHA HELIX": {"H"},
+        "3-10 HELIX": {"G"},
+        "PI HELIX": {"I"},
+        "ISOLATED BETA-BRIDGE RESIDUE": {"B"},
+        "BETA BRIDGE": {"B"},
+        "BEND": {"S"},
+        "TURN": {"T"},
+        "NONE": {"-"},
+        "COIL": {"-"},
+        "LOOP STRUCTURE": {"T", "S", "-"},
+
+        "H": {"H"},
+        "G": {"G"},
+        "I": {"I"},
+        "B": {"B"},
+        "E": {"E"},
+        "T": {"T"},
+        "S": {"S"},
+        "-": {"-"},
+    }
+
+    normalized: set[str] = set()
+
+    for ss in ss_elements:
+        key = ss.strip().upper()
+
+        if key not in name_to_codes:
+            raise ValueError(
+                f"Unknown secondary structure name {ss!r}. "
+                f"Allowed: {sorted(name_to_codes.keys())}"
+            )
+
+        normalized |= name_to_codes[key]
+
     node_list: List[str] = []
     for n, d in g.nodes(data=True):
         if "ss" not in d:
